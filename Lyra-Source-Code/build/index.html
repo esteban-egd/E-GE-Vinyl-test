@@ -1,0 +1,121 @@
+<!doctype html><html lang="en"><head><base href="/"/><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/><meta name="theme-color" content="#000000"/><title>Lyra Music</title><style>@font-face {
+      font-family: 'Outfit';
+      src: url('./fonts/Outfit-Variable.ttf') format('truetype');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'Outfit-Medium';
+      src: url('./fonts/Outfit-SemiBold.ttf') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'Outfit-Bold';
+      src: url('./fonts/Outfit-SemiBold.ttf') format('truetype');
+      font-weight: bold;
+      font-style: normal;
+      font-display: swap;
+    }
+    /* Icon fonts (react-native-vector-icons) */
+    @font-face { font-family: 'AntDesign'; src: url('./fonts/icons/AntDesign.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'Entypo'; src: url('./fonts/icons/Entypo.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'EvilIcons'; src: url('./fonts/icons/EvilIcons.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'Feather'; src: url('./fonts/icons/Feather.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'FontAwesome'; src: url('./fonts/icons/FontAwesome.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'FontAwesome5_Brands'; src: url('./fonts/icons/FontAwesome5_Brands.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'FontAwesome5_Regular'; src: url('./fonts/icons/FontAwesome5_Regular.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'FontAwesome5_Solid'; src: url('./fonts/icons/FontAwesome5_Solid.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'Fontisto'; src: url('./fonts/icons/Fontisto.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'Foundation'; src: url('./fonts/icons/Foundation.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'Ionicons'; src: url('./fonts/icons/Ionicons.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'MaterialCommunityIcons'; src: url('./fonts/icons/MaterialCommunityIcons.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'MaterialIcons'; src: url('./fonts/icons/MaterialIcons.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'Octicons'; src: url('./fonts/icons/Octicons.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'SimpleLineIcons'; src: url('./fonts/icons/SimpleLineIcons.ttf') format('truetype'); font-display: block; }
+    @font-face { font-family: 'Zocial'; src: url('./fonts/icons/Zocial.ttf') format('truetype'); font-display: block; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background-color: #000;
+      overflow: hidden;
+      font-family: 'Outfit-Medium', 'Outfit', sans-serif;
+    }
+    #root {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    /* Hide scrollbars everywhere by default */
+    * {
+      scrollbar-width: none !important;
+    }
+    *::-webkit-scrollbar {
+      display: none !important;
+    }
+    /* Custom scrollbar only for the main content area */
+    #main-content * {
+      scrollbar-width: thin !important;
+      scrollbar-color: rgba(255, 255, 255, 0.25) transparent !important;
+    }
+    #main-content *::-webkit-scrollbar {
+      display: block !important;
+      width: 8px !important;
+      height: 8px !important;
+    }
+    #main-content *::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.05) !important;
+      border-radius: 4px !important;
+    }
+    #main-content *::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.25) !important;
+      border-radius: 4px !important;
+    }
+    #main-content *::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.4) !important;
+    }
+    #main-content *::-webkit-scrollbar-corner {
+      background: transparent !important;
+    }
+    /* Remove focus outline on all elements */
+    *:focus {
+      outline: none !important;
+    }
+    /* YouTube IFrame API creates iframes at a fixed 640x360 by default; size
+       them to their parent so they don't overflow the player's video area
+       (which on the desktop sidebar is ~264x149) and cover the play/pause
+       controls below it. Most YouTube chrome is suppressed via player URL
+       params in BloomEmbed-Client/react-native/src/EmbedPlayer.web.tsx —
+       but for "Topic" / auto-generated music channels YouTube enforces
+       a title bar at the top and a YouTube logo at the bottom-right
+       regardless of params. Mask those two areas with opaque overlays
+       on the iframe's container so they're not visible inside Lyra's
+       own player UI. */
+    iframe[src*="youtube.com/embed/"] {
+      width: 100% !important;
+      height: 100% !important;
+      pointer-events: none !important;
+      display: block;
+    }
+    /* The iframe's direct parent (div with `aspect-ratio: 16/9`) clips the
+       iframe to the player's video frame and keeps it in a relative
+       stacking context next to its layout siblings. We deliberately don't
+       layer CSS masks on top of the iframe to cover YouTube's chrome
+       (title / "Watch on YouTube" / channel thumbnail): cross-origin
+       iframes are composited in their own layer that sits above z-indexed
+       CSS pseudo-elements in Chromium, so the masks didn't actually cover
+       the chrome — they just added a stray opaque box on the corner. The
+       in-iframe chrome that the YouTube IFrame API ships with controls=0
+       + modestbranding=1 is acceptable in Lyra's player surface. */
+    div[style*="aspect-ratio: 16 / 9"]:has(iframe[src*="youtube.com/embed/"]),
+    div[style*="aspect-ratio:16/9"]:has(iframe[src*="youtube.com/embed/"]) {
+      position: relative !important;
+      overflow: hidden !important;
+    }</style><script>// Polyfill for react-native-reanimated web runtime cleanup
+    if (!globalThis._getAnimationTimestamp) {
+      globalThis._getAnimationTimestamp = function() { return performance.now(); };
+    }</script><base href="/"><script defer="defer" src="./static/js/806.7b379c9b.js"></script><script defer="defer" src="./static/js/main.b3b807f1.js"></script></head><body><div id="root"></div></body></html>

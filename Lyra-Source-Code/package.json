@@ -1,0 +1,26 @@
+{
+  "name": "lyra-desktop",
+  "description": "Lyra Music Desktop App",
+  "version": "1.0.21",
+  "homepage": "https://lyramusic.app",
+  "productName": "Lyra Music",
+  "author": {
+    "name": "Lyra",
+    "email": "support@lyramusic.app"
+  },
+  "main": "electron-build/electron-main.js",
+  "dependencies": {
+    "@aracna/core": "^1.5.0",
+    "@aracna/fcm": "^1.0.33",
+    "discord-rpc": "4.0.1",
+    "electron-context-menu": "^3.6.0",
+    "electron-is-dev": "^2.0.0",
+    "electron-store": "^8.2.0",
+    "electron-unhandled": "^4.0.1",
+    "electron-updater": "^6.1.8",
+    "electron-window-state": "^5.0.3",
+    "hash-wasm": "^4.11.0",
+    "music-metadata": "7.13.0",
+    "node-machine-id": "^1.1.12"
+  }
+}
