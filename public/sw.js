@@ -36,6 +36,18 @@ self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (request.method !== 'GET') return;
 
+  // Skip caching Vite dev server files, hot-reload, source files and node_modules
+  if (
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/node_modules/') ||
+    url.pathname.startsWith('/@') ||
+    url.search.includes('v=') ||
+    url.search.includes('import') ||
+    url.search.includes('t=')
+  ) {
+    return;
+  }
+
   // API calls — network first
   if (url.hostname.includes('pipedapi') || url.hostname.includes('piped')) {
     event.respondWith(

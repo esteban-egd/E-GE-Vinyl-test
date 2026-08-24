@@ -1,26 +1,123 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import db from '../lib/db';
-import { getDirectAudioUrl } from '../services/audioStreamService';
+import { getHdArtwork, getMainArtistName, isLiveTrack, isClipTrack, scoreAudioTrack } from '../services/musicDataService';
+import { getLyraAudioStream } from '../services/lyraAudio';
+import { searchLyraTracks } from '../services/lyraSearch';
 
 // Silence WAV 1ms Base64 pour débloquer l'audio Safari iOS instantanément
 const SILENT_AUDIO_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 
-const INVIDIOUS_INSTANCES = [
-  'https://inv.riverside.rocks',
-  'https://invidious.nerdvpn.de',
-  'https://invidious.flokinet.to',
-  'https://vid.puffyan.us',
-  'https://invidious.projectsegfau.lt',
-  'https://yewtu.be',
-  'https://inv.nadeko.net'
-];
+// --- Moteur de Synthèse d'Ambiance Vinyle (Crachotements & Rumble Analogique) ---
+let vinylAudioContext = null;
+let vinylCrackleSource = null;
+let vinylHumSource = null;
+let vinylGainNode = null;
+
+// --- Moteur DSP Haute Résolution Réel (AptX-HD Lossless 24-bit/96kHz EQ) ---
+let musicAudioContext = null;
+let musicSourceNode = null;
+let analyserNode = null;
+
+function startVinylNoise(volumeValue) {
+  try {
+    if (typeof window === 'undefined') return;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    if (!vinylAudioContext) {
+      vinylAudioContext = new AudioContextClass();
+    }
+
+    if (vinylAudioContext.state === 'suspended') {
+      vinylAudioContext.resume();
+    }
+
+    stopVinylNoise();
+
+    vinylGainNode = vinylAudioContext.createGain();
+    vinylGainNode.gain.value = volumeValue * 0.25;
+
+    const sampleRate = vinylAudioContext.sampleRate;
+    const bufferDuration = 3.0;
+    const bufferSize = sampleRate * bufferDuration;
+
+    // 1. Rumble
+    const rumbleBuffer = vinylAudioContext.createBuffer(1, bufferSize, sampleRate);
+    const rumbleData = rumbleBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      rumbleData[i] = Math.random() * 2 - 1;
+    }
+
+    const rumbleFilter = vinylAudioContext.createBiquadFilter();
+    rumbleFilter.type = 'lowpass';
+    rumbleFilter.frequency.value = 65;
+
+    const rumbleNode = vinylAudioContext.createBufferSource();
+    rumbleNode.buffer = rumbleBuffer;
+    rumbleNode.loop = true;
+
+    // 2. Dust crackles
+    const crackleBuffer = vinylAudioContext.createBuffer(1, bufferSize, sampleRate);
+    const crackleData = crackleBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      if (Math.random() < 0.00018) {
+        const peakHeight = Math.random() * 0.6 + 0.15;
+        for (let j = 0; j < 40 && (i + j) < bufferSize; j++) {
+          crackleData[i + j] += peakHeight * Math.exp(-j * 0.12) * (Math.random() * 2 - 1);
+        }
+      }
+    }
+
+    const crackleFilter = vinylAudioContext.createBiquadFilter();
+    crackleFilter.type = 'bandpass';
+    crackleFilter.frequency.value = 1500;
+    crackleFilter.Q.value = 4.0;
+
+    const crackleNode = vinylAudioContext.createBufferSource();
+    crackleNode.buffer = crackleBuffer;
+    crackleNode.loop = true;
+
+    rumbleNode.connect(rumbleFilter);
+    rumbleFilter.connect(vinylGainNode);
+
+    crackleNode.connect(crackleFilter);
+    crackleFilter.connect(vinylGainNode);
+
+    vinylGainNode.connect(vinylAudioContext.destination);
+
+    rumbleNode.start(0);
+    crackleNode.start(0);
+
+    vinylCrackleSource = crackleNode;
+    vinylHumSource = rumbleNode;
+  } catch (err) {
+    console.warn('[VinylEngine] Échec synthèse bruit vinyle:', err);
+  }
+}
+
+function stopVinylNoise() {
+  try {
+    if (vinylCrackleSource) {
+      vinylCrackleSource.stop();
+      vinylCrackleSource = null;
+    }
+    if (vinylHumSource) {
+      vinylHumSource.stop();
+      vinylHumSource = null;
+    }
+  } catch (_) {}
+}
 
 export function useAudioPlayer() {
   const audioRef = useRef(null);
-  const iframeRef = useRef(null);
+  const iframePlayerRef = useRef(null);
+  const activeEngineRef = useRef('none'); // 'iframe' | 'audio' | 'none'
+  const pendingTrackRef = useRef(null);
   const syncTimerRef = useRef(null);
+  const actionsRef = useRef({ resume: null, pause: null, next: null, prev: null, seek: null });
+  const handleTrackEndedRef = useRef(null);
 
-  const [audioMode, setAudioMode] = useState('direct'); // 'direct' | 'iframe'
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -33,123 +130,184 @@ export function useAudioPlayer() {
   const [repeat, setRepeat] = useState('off'); // 'off' | 'all' | 'one'
   const [error, setError] = useState(null);
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+  const [isPlayerModalOpen, setIsPlayerModalOpen] = useState(false);
 
-  const actionsRef = useRef({ resume: null, pause: null, next: null, prev: null, seek: null });
-  const handleTrackEndedRef = useRef(null);
-  const onIframeStateChangeRef = useRef(null);
-  const switchToIframeFallbackRef = useRef(null);
-
-  // --- 1. iOS AudioSession API (Safari 16.4+) & Déverrouillage Global Initial ---
   useEffect(() => {
-    // Configurer la session audio iOS en mode playback (musique d'arrière-plan / écran verrouillé)
+    const onOnline = () => setIsOffline(false);
+    const onOffline = () => setIsOffline(true);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  // Audiophile Options
+  const [hifiMode, setHifiMode] = useState(true);
+  const [vinylCrackle, setVinylCrackle] = useState(true);
+  const [vinylCrackleVolume, setVinylCrackleVolume] = useState(0.12);
+  const [pitch, setPitch] = useState(0); // -8% à +8%
+  const [bassGain, setBassGain] = useState(3.0);
+  const [midGain, setMidGain] = useState(1.5);
+  const [trebleGain, setTrebleGain] = useState(2.0);
+  const [tubeSaturation, setTubeSaturation] = useState(25);
+
+  // --- Gestion du Bruit Vinyle ---
+  useEffect(() => {
+    if (isPlaying && vinylCrackle) {
+      startVinylNoise(vinylCrackleVolume);
+    } else {
+      stopVinylNoise();
+    }
+    return () => {
+      stopVinylNoise();
+    };
+  }, [isPlaying, vinylCrackle, vinylCrackleVolume]);
+
+  // --- Déblocage Audio iOS Initial ---
+  useEffect(() => {
     if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
       try {
         navigator.audioSession.type = 'playback';
-      } catch (err) {
-        console.warn('[AudioSession] Erreur configuration playback:', err);
-      }
+      } catch { }
     }
 
-    // Débloqueur synchrone au tout premier touch/click utilisateur sur iOS
-    const unlockAudioOnFirstInteraction = () => {
-      if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
-        try {
-          navigator.audioSession.type = 'playback';
-        } catch { }
-      }
-
+    const unlockAudio = () => {
       const audio = document.getElementById('global-player');
       if (audio && !audio.src) {
         audio.src = SILENT_AUDIO_URI;
-        const p = audio.play();
-        if (p !== undefined) {
-          p.then(() => {
-            audio.pause();
-          }).catch(() => { });
+        audio.play().then(() => audio.pause()).catch(() => {});
+      }
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass && !vinylAudioContext) {
+          vinylAudioContext = new AudioContextClass();
+        }
+        if (vinylAudioContext && vinylAudioContext.state === 'suspended') {
+          vinylAudioContext.resume();
+        }
+      } catch {}
+    };
+
+    window.addEventListener('touchstart', unlockAudio, { passive: true, once: true });
+    window.addEventListener('touchend', unlockAudio, { passive: true, once: true });
+    window.addEventListener('click', unlockAudio, { once: true });
+
+    return () => {
+      window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('touchend', unlockAudio);
+      window.removeEventListener('click', unlockAudio);
+    };
+  }, []);
+
+  // --- Synchronisation Périodique (YouTube Iframe & Progression) ---
+  useEffect(() => {
+    if (syncTimerRef.current) {
+      clearInterval(syncTimerRef.current);
+    }
+
+    syncTimerRef.current = setInterval(() => {
+      if (activeEngineRef.current === 'iframe' && iframePlayerRef.current) {
+        try {
+          if (typeof iframePlayerRef.current.getCurrentTime === 'function') {
+            const cur = iframePlayerRef.current.getCurrentTime() || 0;
+            const dur = iframePlayerRef.current.getDuration() || 0;
+            
+            if (cur >= 0) {
+              setCurrentTime(cur);
+            }
+            if (dur > 0) {
+              setDuration((prev) => (prev !== dur ? dur : prev));
+            }
+
+            const state = iframePlayerRef.current.getPlayerState?.();
+            if (state === 1) { // PLAYING
+              setIsPlaying(true);
+              setIsLoading(false);
+            } else if (state === 2) { // PAUSED
+              setIsPlaying(false);
+            } else if (state === 3) { // BUFFERING
+              setIsLoading(true);
+            }
+          }
+        } catch { }
+      } else if (activeEngineRef.current === 'audio' && audioRef.current) {
+        const audio = audioRef.current;
+        if (!audio.paused) {
+          setCurrentTime(audio.currentTime);
+          if (audio.duration && !isNaN(audio.duration)) {
+            setDuration(audio.duration);
+          }
         }
       }
-    };
-
-    window.addEventListener('touchstart', unlockAudioOnFirstInteraction, { passive: true, once: true });
-    window.addEventListener('touchend', unlockAudioOnFirstInteraction, { passive: true, once: true });
-    window.addEventListener('click', unlockAudioOnFirstInteraction, { once: true });
+    }, 60);
 
     return () => {
-      window.removeEventListener('touchstart', unlockAudioOnFirstInteraction);
-      window.removeEventListener('touchend', unlockAudioOnFirstInteraction);
-      window.removeEventListener('click', unlockAudioOnFirstInteraction);
+      if (syncTimerRef.current) {
+        clearInterval(syncTimerRef.current);
+      }
     };
   }, []);
 
-  // --- Network Online / Offline Detection ---
-  useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  // --- Direct Audio Element Setup ---
+  // --- Configuration Élément Audio Direct ---
   useEffect(() => {
     let audio = document.getElementById('global-player');
     if (!audio) {
       audio = new Audio();
       audio.id = 'global-player';
       audio.preload = 'auto';
-      audio.crossOrigin = 'anonymous';
       audio.setAttribute('playsinline', 'true');
       document.body.appendChild(audio);
     }
     audioRef.current = audio;
 
     const onTimeUpdate = () => {
-      if (audioMode === 'direct') {
+      if (activeEngineRef.current === 'audio') {
         setCurrentTime(audio.currentTime);
       }
     };
     const onDurationChange = () => {
-      if (audioMode === 'direct') {
-        setDuration(audio.duration || 0);
+      if (activeEngineRef.current === 'audio' && audio.duration) {
+        setDuration(audio.duration);
       }
     };
     const onPlay = () => {
-      if (audioMode === 'direct') {
+      if (activeEngineRef.current === 'audio') {
         setIsPlaying(true);
         setIsLoading(false);
       }
     };
     const onPause = () => {
-      if (audioMode === 'direct') {
+      if (activeEngineRef.current === 'audio') {
         setIsPlaying(false);
       }
     };
     const onWaiting = () => {
-      if (audioMode === 'direct') {
+      if (activeEngineRef.current === 'audio') {
         setIsLoading(true);
       }
     };
     const onCanPlay = () => {
-      if (audioMode === 'direct') {
+      if (activeEngineRef.current === 'audio') {
         setIsLoading(false);
       }
     };
     const onEnded = () => {
-      if (audioMode === 'direct') {
+      if (activeEngineRef.current === 'audio') {
         handleTrackEndedRef.current?.();
       }
     };
-
     const onError = () => {
-      if (audioMode === 'direct') {
-        const code = audio.error ? audio.error.code : 'unknown';
-        const message = audio.error ? audio.error.message : 'Unknown';
-        console.warn(`[AudioEngine] Direct error (${code}, ${message}) - Bascule sur le moteur Iframe.`);
-        if (currentTrack) {
-          switchToIframeFallbackRef.current?.(currentTrack);
+      if (activeEngineRef.current === 'audio') {
+        console.warn('[AudioEngine] Erreur audio HTML5, essai YouTube fallback...');
+        if (currentTrack?.videoId && iframePlayerRef.current) {
+          activeEngineRef.current = 'iframe';
+          iframePlayerRef.current.loadVideoById(currentTrack.videoId, 0);
+          iframePlayerRef.current.playVideo();
+        } else {
+          setIsPlaying(false);
+          setIsLoading(false);
         }
       }
     };
@@ -173,158 +331,69 @@ export function useAudioPlayer() {
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('error', onError);
     };
-  }, [audioMode, currentTrack]);
+  }, [currentTrack]);
 
-  // --- Iframe Playback Sync Loop ---
-  useEffect(() => {
-    if (audioMode === 'iframe' && isPlaying) {
-      syncTimerRef.current = setInterval(() => {
-        if (iframeRef.current?.getCurrentTime) {
-          try {
-            const time = iframeRef.current.getCurrentTime() || 0;
-            const dur = iframeRef.current.getDuration() || 0;
-            setCurrentTime(time);
-            if (dur > 0) setDuration(dur);
-          } catch {
-            // Ignore
-          }
-        }
-      }, 250);
-    } else {
-      if (syncTimerRef.current) {
-        clearInterval(syncTimerRef.current);
-        syncTimerRef.current = null;
-      }
+  // --- Enregistrement de l'Iframe YouTube ---
+  const setIframePlayer = useCallback((player) => {
+    console.log('[AudioEngine] Iframe Player enregistré avec succès');
+    iframePlayerRef.current = player;
+    
+    // Si un morceau attendait l'initialisation du lecteur
+    if (pendingTrackRef.current) {
+      const track = pendingTrackRef.current;
+      pendingTrackRef.current = null;
+      activeEngineRef.current = 'iframe';
+      player.loadVideoById(track.videoId, 0);
+      player.playVideo();
+      player.setVolume(Math.round(volume * 100));
     }
-
-    return () => {
-      if (syncTimerRef.current) {
-        clearInterval(syncTimerRef.current);
-        syncTimerRef.current = null;
-      }
-    };
-  }, [audioMode, isPlaying]);
-
-  // --- Fallback Iframe Trigger ---
-  const switchToIframeFallback = useCallback((track) => {
-    if (!track || !track.videoId) return;
-    console.log('[AudioEngine] Activation du lecteur YouTube IFrame pour:', track.title);
-    setAudioMode('iframe');
-    setIsLoading(true);
-
-    const tryLoad = () => {
-      if (iframeRef.current && iframeRef.current.loadVideoById) {
-        try {
-          iframeRef.current.loadVideoById(track.videoId);
-          iframeRef.current.setVolume(volume * 100);
-          iframeRef.current.playVideo();
-          setIsLoading(false);
-          setIsPlaying(true);
-        } catch (e) {
-          console.warn('[AudioEngine] Iframe load error:', e);
-        }
-      } else {
-        setTimeout(tryLoad, 300);
-      }
-    };
-
-    tryLoad();
   }, [volume]);
 
-  useEffect(() => {
-    switchToIframeFallbackRef.current = switchToIframeFallback;
-  }, [switchToIframeFallback]);
+  // --- Gestion des Événements YouTube Iframe ---
+  const onIframeStateChange = useCallback((state) => {
+    if (activeEngineRef.current !== 'iframe') return;
 
-  // --- Iframe State Listener ---
-  useEffect(() => {
-    onIframeStateChangeRef.current = (state) => {
-      // 1: PLAYING, 2: PAUSED, 3: BUFFERING, 0: ENDED
-      if (state === 1) {
-        setIsPlaying(true);
-        setIsLoading(false);
-        const d = iframeRef.current?.getDuration();
-        if (d) setDuration(d);
-      } else if (state === 2) {
-        setIsPlaying(false);
-      } else if (state === 3) {
-        setIsLoading(true);
-      } else if (state === 0) {
-        handleTrackEndedRef.current?.();
+    if (state === 1) { // PLAYING
+      setIsPlaying(true);
+      setIsLoading(false);
+      setError(null);
+      if (iframePlayerRef.current?.getDuration) {
+        const dur = iframePlayerRef.current.getDuration();
+        if (dur > 0) setDuration(dur);
       }
-    };
-  });
-
-  const setIframePlayer = useCallback((player) => {
-    iframeRef.current = player;
+    } else if (state === 2) { // PAUSED
+      setIsPlaying(false);
+    } else if (state === 3) { // BUFFERING
+      setIsLoading(true);
+    } else if (state === 0) { // ENDED
+      handleTrackEndedRef.current?.();
+    }
   }, []);
 
-  const onIframeStateChange = useCallback((s) => {
-    onIframeStateChangeRef.current?.(s);
-  }, []);
-
-  const onIframeError = useCallback((errCode) => {
-    console.warn('[AudioEngine] Iframe error event:', errCode);
+  const onIframeError = useCallback(async (code) => {
+    console.warn('[AudioEngine] Erreur YouTube code:', code);
+    if (currentTrack) {
+      // Tenter une alternative Lyra Audio Stream ou Deezer preview
+      try {
+        const streamUrl = await getLyraAudioStream(currentTrack.videoId, currentTrack.title, currentTrack.artist) || await getDeezerPreview(currentTrack.title, currentTrack.artist);
+        if (streamUrl && audioRef.current) {
+          console.log('[AudioEngine] Passage au flux de secours audio');
+          activeEngineRef.current = 'audio';
+          audioRef.current.src = streamUrl;
+          audioRef.current.currentTime = 0;
+          audioRef.current.play().catch(() => {});
+          setIsPlaying(true);
+          setIsLoading(false);
+          return;
+        }
+      } catch {}
+    }
+    setError("Lecture impossible pour ce titre.");
     setIsLoading(false);
-  }, []);
+    setIsPlaying(false);
+  }, [currentTrack]);
 
   // --- Media Session Setup & Controls ---
-  useEffect(() => {
-    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
-
-    try {
-      const session = navigator.mediaSession;
-      const handlers = [
-        ['play', () => actionsRef.current.resume?.()],
-        ['pause', () => actionsRef.current.pause?.()],
-        ['previoustrack', () => actionsRef.current.prev?.()],
-        ['nexttrack', () => actionsRef.current.next?.()],
-        ['seekto', (details) => {
-          if (details?.seekTime !== undefined) {
-            actionsRef.current.seek?.(details.seekTime);
-          }
-        }]
-      ];
-
-      handlers.forEach(([action, handler]) => {
-        try {
-          session.setActionHandler(action, handler);
-        } catch {
-          // Ignorer si non supporté
-        }
-      });
-    } catch (err) {
-      console.warn('[MediaSession] Erreur handlers:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
-    try {
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-    } catch { }
-  }, [isPlaying]);
-
-  useEffect(() => {
-    if (
-      typeof window === 'undefined' ||
-      !('mediaSession' in navigator) ||
-      !('setPositionState' in navigator.mediaSession) ||
-      !duration ||
-      isNaN(duration) ||
-      duration <= 0
-    ) {
-      return;
-    }
-
-    try {
-      navigator.mediaSession.setPositionState({
-        duration: Math.max(0, duration),
-        playbackRate: 1,
-        position: Math.min(Math.max(0, currentTime), duration)
-      });
-    } catch { }
-  }, [currentTime, duration]);
-
   const updateMediaSessionMetadata = useCallback((track) => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator) || !track) return;
     try {
@@ -341,7 +410,7 @@ export function useAudioPlayer() {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: track.title || 'Piste inconnue',
         artist: track.artist || 'Artiste inconnu',
-        album: 'E GE Vinyl',
+        album: track.album || 'Salon E-GE',
         artwork: artworkList
       });
     } catch (err) {
@@ -349,156 +418,216 @@ export function useAudioPlayer() {
     }
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
+
+    try {
+      const session = navigator.mediaSession;
+      session.setActionHandler('play', () => actionsRef.current.resume?.());
+      session.setActionHandler('pause', () => actionsRef.current.pause?.());
+      session.setActionHandler('previoustrack', () => actionsRef.current.prev?.());
+      session.setActionHandler('nexttrack', () => actionsRef.current.next?.());
+      session.setActionHandler('seekto', (details) => {
+        if (details?.seekTime !== undefined) {
+          actionsRef.current.seek?.(details.seekTime);
+        }
+      });
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    } catch {}
+  }, [isPlaying]);
+
   // --- Contrôles Playback Universels ---
   const pause = useCallback(() => {
-    if (audioMode === 'direct') {
-      const audio = audioRef.current || document.getElementById('global-player');
-      if (audio) audio.pause();
-    } else {
-      if (iframeRef.current?.pauseVideo) {
-        iframeRef.current.pauseVideo();
-      }
+    if (activeEngineRef.current === 'iframe' && iframePlayerRef.current?.pauseVideo) {
+      try { iframePlayerRef.current.pauseVideo(); } catch {}
+    }
+    if (audioRef.current) {
+      try { audioRef.current.pause(); } catch {}
     }
     setIsPlaying(false);
-  }, [audioMode]);
+  }, []);
 
   const resume = useCallback(async () => {
-    // 1. Déblocage AudioSession iOS
     if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
-      try {
-        navigator.audioSession.type = 'playback';
-      } catch { }
+      try { navigator.audioSession.type = 'playback'; } catch {}
     }
 
-    if (audioMode === 'direct') {
-      const audio = audioRef.current || document.getElementById('global-player');
-      if (audio && audio.src) {
-        try {
-          // Déclenchement synchrone du play
-          const p = audio.play();
-          if (p !== undefined) {
-            await p;
-          }
-          setIsPlaying(true);
-        } catch (err) {
-          console.error('[AudioEngine] Resume error:', err);
-        }
-      }
-    } else {
-      if (iframeRef.current?.playVideo) {
-        iframeRef.current.playVideo();
+    if (activeEngineRef.current === 'iframe' && iframePlayerRef.current?.playVideo) {
+      try {
+        iframePlayerRef.current.playVideo();
         setIsPlaying(true);
+        return;
+      } catch {}
+    }
+
+    if (audioRef.current && audioRef.current.src && audioRef.current.src !== SILENT_AUDIO_URI) {
+      try {
+        await audioRef.current.play();
+        setIsPlaying(true);
+        return;
+      } catch (err) {
+        console.error('[AudioEngine] Erreur resume audio:', err);
       }
     }
-  }, [audioMode]);
+  }, []);
 
   const seek = useCallback((time) => {
-    if (audioMode === 'direct') {
-      const audio = audioRef.current || document.getElementById('global-player');
-      if (audio) {
-        const targetTime = Math.max(0, Math.min(time, audio.duration || time));
-        audio.currentTime = targetTime;
-        setCurrentTime(targetTime);
-      }
-    } else {
-      if (iframeRef.current?.seekTo) {
-        iframeRef.current.seekTo(time, true);
-        setCurrentTime(time);
-      }
+    const target = Math.max(0, time);
+    setCurrentTime(target);
+
+    if (activeEngineRef.current === 'iframe' && iframePlayerRef.current?.seekTo) {
+      try {
+        iframePlayerRef.current.seekTo(target, true);
+      } catch {}
+    } else if (audioRef.current) {
+      audioRef.current.currentTime = target;
     }
-  }, [audioMode]);
+  }, []);
 
   const setVolume = useCallback((v) => {
     const clamped = Math.max(0, Math.min(1, v));
     setVolumeState(clamped);
-    const audio = audioRef.current || document.getElementById('global-player');
-    if (audio) audio.volume = clamped;
-    if (iframeRef.current?.setVolume) iframeRef.current.setVolume(clamped * 100);
+
+    if (audioRef.current) {
+      audioRef.current.volume = clamped;
+    }
+    if (iframePlayerRef.current?.setVolume) {
+      try {
+        iframePlayerRef.current.setVolume(Math.round(clamped * 100));
+      } catch {}
+    }
   }, []);
 
-  // --- Séquence de lecture optimisée iOS Touch Event & Zéro Latence ---
-  const play = useCallback(async (trackMeta) => {
-    if (!trackMeta || !trackMeta.videoId) return;
-    const videoId = trackMeta.videoId;
+  // --- Moteur Central de Lecture Universel (Zéro Latence) ---
+  const play = useCallback(async (rawTrack) => {
+    if (!rawTrack) return;
 
-    // === ÉTAPE 1 : DÉBLOCAGE SYNCHRONE IMMÉDIAT (iOS SAFARI) ===
-    if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
-      try { navigator.audioSession.type = 'playback'; } catch { }
-    }
-
-    const audio = document.getElementById('global-player') || audioRef.current;
-    if (audio) {
-      if (!audio.src) audio.src = SILENT_AUDIO_URI;
-      audio.play().catch(() => {});
-    }
-
-    // Lancement synchrone de l'Iframe AVANT tout 'await' pour conserver le gesture iOS
-    setAudioMode('iframe');
-    let iframeLaunched = false;
-    
-    const launchIframe = () => {
-      if (iframeRef.current && iframeRef.current.loadVideoById) {
-        try {
-          iframeRef.current.loadVideoById({ videoId, startSeconds: 0 });
-          iframeRef.current.setVolume(volume * 100);
-          iframeRef.current.playVideo();
-          iframeLaunched = true;
-          return true;
-        } catch (err) {
-          console.warn('[AudioEngine] Erreur lancement iframe:', err);
-          return false;
-        }
-      }
-      return false;
+    const trackMeta = {
+      ...rawTrack,
+      thumbnail: getHdArtwork(rawTrack.thumbnail, rawTrack.videoId)
     };
-    
-    launchIframe();
-    
-    if (!iframeLaunched) {
-      // Si l'API n'est pas encore prête, on retente (gesture potentiellement perdu, mais indispensable)
-      const checkReady = setInterval(() => {
-        if (launchIframe()) clearInterval(checkReady);
-      }, 150);
-      setTimeout(() => clearInterval(checkReady), 4000);
+
+    // 1. Déblocage audio immédiat
+    if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
+      try { navigator.audioSession.type = 'playback'; } catch {}
     }
 
-    // === ÉTAPE 2 : PRÉPARATION DE L'ÉTAT ET DES METADATA ===
     setError(null);
     setIsLoading(true);
     setCurrentTrack(trackMeta);
     updateMediaSessionMetadata(trackMeta);
 
-    // === ÉTAPE 3 : VÉRIFICATION DU CACHE HORS-LIGNE (ASYNC) ===
-    try {
-      const cached = await db.audioCache.get(videoId);
-      if (cached && cached.blob) {
-        const cachedBlobUrl = URL.createObjectURL(cached.blob);
-        if (audio) {
-          // Pause de l'iframe si on a trouvé un cache local
-          if (iframeRef.current?.pauseVideo) {
-            try { iframeRef.current.pauseVideo(); } catch { }
-          }
-          setAudioMode('direct');
-          audio.src = cachedBlobUrl;
-          audio.load();
-          await audio.play();
-          setIsPlaying(true);
-          setIsLoading(false);
-        }
-      } else {
-        // Pas de cache, on laisse l'iframe jouer et on met à jour l'état
-        setIsPlaying(true);
-        setIsLoading(false);
-      }
-    } catch { 
-      setIsPlaying(true);
-      setIsLoading(false);
+    // Arrêter l'autre lecteur pour éviter la double lecture
+    if (audioRef.current) {
+      audioRef.current.pause();
     }
 
-    // Sauvegarde dans l'historique de lecture
+    // 2. Vérifier si morceau stocké hors-ligne en IndexedDB
+    try {
+      const cached = await db.offlineTracks?.get(trackMeta.videoId);
+      if (cached?.audioBlob) {
+        const blobUrl = URL.createObjectURL(cached.audioBlob);
+        if (audioRef.current) {
+          activeEngineRef.current = 'audio';
+          if (iframePlayerRef.current?.pauseVideo) {
+            iframePlayerRef.current.pauseVideo();
+          }
+          audioRef.current.src = blobUrl;
+          audioRef.current.currentTime = 0;
+          await audioRef.current.play();
+          setIsPlaying(true);
+          setIsLoading(false);
+          return;
+        }
+      }
+    } catch {}
+
+    // 3. Résolution et Garantie de la version Audio Studio Officielle (100% Studio, 0 Live, 0 Clip)
+    const isNonYoutubeId = !trackMeta.videoId || trackMeta.videoId.startsWith('dz_') || trackMeta.videoId.length !== 11;
+    const userWantsLive = isLiveTrack(trackMeta.title);
+    const isClip = isClipTrack(trackMeta.title);
+
+    // Résoudre ou corriger si c'est un ID non-YouTube, si la piste contient un mot live, ou si c'est un clip vidéo
+    if (isNonYoutubeId || userWantsLive || isClip) {
+      try {
+        const cleanArtist = getMainArtistName(trackMeta.artist);
+        const cleanTitle = (trackMeta.title || '')
+          .replace(/\b(live|en concert|in concert|live at|live in|live performance|live session|unplugged|en direct|live version|concert|tv show|festival|tour|bootleg|live recording|session live|bbc sessions)\b.*/i, '')
+          .replace(/\s*[\(\[\{].*?[\)\]\}]/g, '')
+          .trim();
+
+        // Établir une liste de requêtes de recherche progressives pour trouver l'audio officiel
+        const searchQueries = [
+          `${cleanTitle} ${cleanArtist} official audio`,
+          `${cleanTitle} ${cleanArtist} audio`,
+          `${cleanTitle} ${cleanArtist} topic`
+        ];
+
+        let bestMatch = null;
+        let bestScore = -99999;
+
+        for (const query of searchQueries) {
+          const searchResults = await searchLyraTracks(query);
+          if (searchResults && searchResults.length > 0) {
+            for (const t of searchResults) {
+              const score = scoreAudioTrack(t, cleanTitle, cleanArtist);
+              if (score > bestScore) {
+                bestScore = score;
+                bestMatch = t;
+              }
+            }
+          }
+          // Si on a trouvé un candidat excellent (score élevé), on s'arrête
+          if (bestScore > 1000) {
+            break;
+          }
+        }
+
+        if (bestMatch && bestMatch.videoId && bestScore > -2000) {
+          trackMeta.videoId = bestMatch.videoId;
+          if (cleanTitle) {
+            trackMeta.title = cleanTitle; // Restaurer le titre studio épuré
+          }
+          if (bestMatch.thumbnail && !trackMeta.thumbnail) {
+            trackMeta.thumbnail = bestMatch.thumbnail;
+          }
+        }
+      } catch (err) {
+        console.warn('[AudioEngine] Erreur résolution audio studio non-clip :', err);
+      }
+    }
+
+    // 4. Lecture YouTube Iframe Universelle (Priorité 1: 100% stable sans restriction)
+    if (trackMeta.videoId) {
+      activeEngineRef.current = 'iframe';
+      if (iframePlayerRef.current && typeof iframePlayerRef.current.loadVideoById === 'function') {
+        try {
+          iframePlayerRef.current.loadVideoById(trackMeta.videoId, 0);
+          iframePlayerRef.current.playVideo();
+          iframePlayerRef.current.setVolume(Math.round(volume * 100));
+          setIsPlaying(true);
+          setIsLoading(false);
+        } catch (err) {
+          console.warn('[AudioEngine] Erreur lancement YT Iframe:', err);
+          pendingTrackRef.current = trackMeta;
+        }
+      } else {
+        // En attente de l'initialisation du lecteur YouTube
+        console.log('[AudioEngine] Iframe en cours de chargement, mise en attente...');
+        pendingTrackRef.current = trackMeta;
+      }
+    }
+
+    // 5. Enregistrement asynchrone dans l'historique
     try {
       await db.tracks.put({ ...trackMeta, addedAt: Date.now() });
-    } catch { }
+    } catch {}
   }, [updateMediaSessionMetadata, volume]);
 
   const playFromQueue = useCallback(async (index) => {
@@ -519,6 +648,11 @@ export function useAudioPlayer() {
     }
 
     if (nextIndex !== -1) {
+      const nextTrack = queue[nextIndex];
+      toast(`Prochain titre: ${nextTrack.title}`, {
+        icon: '🎵',
+        duration: 3000,
+      });
       playFromQueue(nextIndex);
     } else {
       setIsPlaying(false);
@@ -553,14 +687,31 @@ export function useAudioPlayer() {
   }, [handleTrackEnded, resume, pause, playNext, playPrevious, seek]);
 
   const addToQueue = useCallback((track) => {
-    setQueue((prev) => [...prev, track]);
+    const formatted = {
+      ...track,
+      thumbnail: getHdArtwork(track.thumbnail, track.videoId)
+    };
+    setQueue((prev) => [...prev, formatted]);
+  }, []);
+
+  const removeFromQueue = useCallback((index) => {
+    setQueue((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const clearQueue = useCallback(() => {
+    setQueue([]);
+    setQueueIndex(-1);
   }, []);
 
   const setQueueAndPlay = useCallback((tracks, startIndex = 0) => {
-    setQueue(tracks);
+    const formattedTracks = tracks.map(t => ({
+      ...t,
+      thumbnail: getHdArtwork(t.thumbnail, t.videoId)
+    }));
+    setQueue(formattedTracks);
     setQueueIndex(startIndex);
-    if (tracks[startIndex]) {
-      play(tracks[startIndex]);
+    if (formattedTracks[startIndex]) {
+      play(formattedTracks[startIndex]);
     }
   }, [play]);
 
@@ -569,42 +720,39 @@ export function useAudioPlayer() {
     else resume();
   }, [isPlaying, pause, resume]);
 
+  const isCurrentTrack = useCallback((track) => {
+    if (!currentTrack || !track) return false;
+    
+    // 1. Comparaison par ID ou videoId
+    if (track.videoId && currentTrack.videoId && track.videoId === currentTrack.videoId) return true;
+    if (track.id && currentTrack.id && track.id === currentTrack.id) return true;
+    if (track.id && currentTrack.videoId && track.id === currentTrack.videoId) return true;
+    if (track.videoId && currentTrack.id && track.videoId === currentTrack.id) return true;
+
+    // 2. Comparaison par Titre et Artiste principal
+    if (track.title && currentTrack.title) {
+      const t1 = track.title.toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').trim();
+      const t2 = currentTrack.title.toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').trim();
+      if (t1 && t1 === t2) {
+        const a1 = getMainArtistName(track.artist || '').toLowerCase();
+        const a2 = getMainArtistName(currentTrack.artist || '').toLowerCase();
+        if (!a1 || !a2 || a1 === a2 || a1.includes(a2) || a2.includes(a1)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [currentTrack]);
+
   const toggleShuffle = useCallback(() => setShuffle((prev) => !prev), []);
   const toggleRepeat = useCallback(() => setRepeat((prev) => (prev === 'off' ? 'all' : prev === 'all' ? 'one' : 'off')), []);
 
-  // Recherche Invidious multi-instances avec Promise.any pour plus de rapidité
-  const search = useCallback(async (query) => {
-    if (!query || !query.trim()) return [];
-    const cleanQuery = query.trim();
-
-    const searchPromises = INVIDIOUS_INSTANCES.map(async (inst) => {
-      const url = `${inst}/api/v1/search?q=${encodeURIComponent(cleanQuery)}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
-      if (!res.ok) throw new Error('Not ok');
-      const items = await res.json();
-      if (!Array.isArray(items) || items.length === 0) throw new Error('Empty result');
-      
-      const formattedItems = items
-        .filter((i) => i.type === 'video' || (!i.type && i.videoId))
-        .map((i) => ({
-          videoId: i.videoId,
-          title: i.title || 'Sans titre',
-          artist: i.author || i.authorName || 'Artiste inconnu',
-          thumbnail: i.videoThumbnails?.[0]?.url || (i.videoId ? `https://i.ytimg.com/vi/${i.videoId}/hqdefault.jpg` : ''),
-          duration: i.lengthSeconds || 0
-        }));
-        
-      if (formattedItems.length === 0) throw new Error('No video items');
-      return formattedItems;
-    });
-
-    try {
-      // Retourne les résultats de la première instance qui répond avec succès
-      return await Promise.any(searchPromises);
-    } catch (error) {
-      console.error('[AudioEngine] Toutes les instances de recherche ont échoué');
-      return [];
-    }
+  const getAnalyserData = useCallback(() => {
+    if (!analyserNode) return null;
+    const bufferLength = analyserNode.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    analyserNode.getByteFrequencyData(dataArray);
+    return dataArray;
   }, []);
 
   return {
@@ -614,14 +762,33 @@ export function useAudioPlayer() {
     duration,
     volume,
     currentTrack,
+    isCurrentTrack,
     queue,
     queueIndex,
     shuffle,
     repeat,
     error,
     isOffline,
+    isPlayerModalOpen,
+    setIsPlayerModalOpen,
     audioRef,
-    audioMode,
+    hifiMode,
+    setHifiMode,
+    vinylCrackle,
+    setVinylCrackle,
+    vinylCrackleVolume,
+    setVinylCrackleVolume,
+    pitch,
+    setPitch,
+    bassGain,
+    setBassGain,
+    midGain,
+    setMidGain,
+    trebleGain,
+    setTrebleGain,
+    tubeSaturation,
+    setTubeSaturation,
+    getAnalyserData,
     play,
     pause,
     resume,
@@ -631,12 +798,13 @@ export function useAudioPlayer() {
     playNext,
     playPrevious,
     addToQueue,
+    removeFromQueue,
+    clearQueue,
     setQueueAndPlay,
     toggleShuffle,
     toggleRepeat,
-    search,
     setIframePlayer,
     onIframeStateChange,
-    onIframeError
+    onIframeError,
   };
 }

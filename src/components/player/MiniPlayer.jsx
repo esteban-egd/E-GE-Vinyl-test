@@ -1,19 +1,20 @@
 import { useAudio } from '../../context/AudioContext';
+import { useTheme } from '../../context/ThemeContext';
 import { Play, Pause, SkipForward } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 export default function MiniPlayer() {
   const { currentTrack, isPlaying, togglePlayPause, playNext, isLoading } = useAudio();
+  const { currentTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
 
-  if (!currentTrack) return null;
+  if (!currentTrack || location.pathname === '/player') return null;
 
-  // Don't show mini player if we are already on the HomePage (full player)
-  if (location.pathname === '/') return null;
+  // Player is displayed on all pages including Accueil
 
   const handleOpenPlayer = () => {
-    navigate('/');
+    navigate('/player');
   };
 
   return (
@@ -23,7 +24,12 @@ export default function MiniPlayer() {
         className="glass-strong flex items-center p-2 pr-4 rounded-xl shadow-lg cursor-pointer hover:bg-white/5 transition-colors border border-white/10 relative overflow-hidden"
       >
         {/* Subtle background glow based on currently playing state */}
-        <div className={`absolute inset-0 bg-gradient-to-r from-purple-500/10 to-cyan-500/10 opacity-0 transition-opacity ${isPlaying ? 'opacity-100' : ''}`} />
+        <div 
+          className={`absolute inset-0 opacity-0 transition-opacity duration-500 ${isPlaying ? 'opacity-100' : ''}`}
+          style={{
+            background: `linear-gradient(to right, ${currentTheme?.primary || '#1ED760'}15, ${currentTheme?.secondary || '#32EBB0'}05)`
+          }}
+        />
 
         {/* Thumbnail */}
         <div className="w-12 h-12 shrink-0 rounded-md overflow-hidden relative z-10">

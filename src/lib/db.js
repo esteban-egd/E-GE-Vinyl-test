@@ -19,4 +19,14 @@ db.version(1).stores({
   playlistTracks: '++id, playlistId, videoId, title, artist, thumbnail, position',
 });
 
+db.version(2).stores({
+  playlists: '++id, name, cover, createdAt, updatedAt',
+  followedArtists: 'name, avatar, genre, followedAt',
+});
+
+db.version(3).stores({
+  offlineTracks: 'videoId, title, artist, album, thumbnail, downloadedAt'
+});
+
 export default db;
+

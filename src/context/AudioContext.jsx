@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 
-const AudioCtx = createContext(null);
+export const AudioCtx = createContext(null);
 
 export function AudioProvider({ children }) {
   const player = useAudioPlayer();

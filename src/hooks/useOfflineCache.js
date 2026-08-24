@@ -1,14 +1,7 @@
 import { useState, useCallback } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useLiveQuery } from './useLiveQuery';
 import db from '../lib/db';
-import { getDirectAudioUrl } from '../services/audioStreamService';
-
-const INSTANCES = [
-  'https://invidious.flokinet.to',
-  'https://vid.puffyan.us',
-  'https://invidious.projectsegfau.lt',
-  'https://inv.riverside.rocks'
-];
+import { getDeezerPreview } from '../services/musicDataService';
 
 export function useOfflineCache() {
   const [downloading, setDownloading] = useState(new Set());
@@ -18,7 +11,7 @@ export function useOfflineCache() {
     const cache = await db.audioCache.toArray();
     const metadata = await Promise.all(
       cache.map(async (c) => {
-        const track = await db.tracks.get(c.videoId);
+        const track = await db.tracks.get(c.id);
         return {
           ...track,
           cachedAt: c.cachedAt,
@@ -27,7 +20,7 @@ export function useOfflineCache() {
         };
       })
     );
-    return metadata.filter(m => m.videoId);
+    return metadata.filter(m => m.id);
   }, [], []);
 
   const getCacheSize = useCallback(async () => {
@@ -38,62 +31,34 @@ export function useOfflineCache() {
         if (item.blob) totalBytes += item.blob.size;
       });
       return (totalBytes / (1024 * 1024)).toFixed(2);
-    } catch (e) {
+    } catch {
       return "0.00";
     }
   }, []);
 
-  const isCached = useCallback((videoId) => {
-    return cachedTracks?.some((t) => t.videoId === videoId) || false;
+  const isCached = useCallback((id) => {
+    return cachedTracks?.some((t) => t.id === id) || false;
   }, [cachedTracks]);
 
   const downloadTrack = useCallback(async (track) => {
-    const videoId = track.videoId;
-    if (isCached(videoId)) return;
+    const id = track.id || track.id || `${track.title}_${track.artist}`;
+    if (isCached(id)) return;
 
-    setDownloading((prev) => new Set(prev).add(videoId));
+    setDownloading((prev) => new Set(prev).add(id));
     setError(null);
 
-    let streamUrl = null;
+    let streamUrl = track.previewUrl;
     let mimeType = 'audio/mp3';
 
-    // 1. Try Cobalt direct extraction
-    try {
-      streamUrl = await getDirectAudioUrl(videoId);
-    } catch {
-      // Fallback
-    }
-
-    // 2. Fallback to instances if Cobalt didn't return a stream
     if (!streamUrl) {
-      for (const instance of INSTANCES) {
-        try {
-          const res = await fetch(`${instance}/api/v1/videos/${videoId}`, { signal: AbortSignal.timeout(8000) });
-          if (!res.ok) continue;
-          
-          const data = await res.json();
-          if (!data.adaptiveFormats) continue;
-          
-          const streams = data.adaptiveFormats
-            .filter(s => s.type && s.type.includes('audio'))
-            .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-            
-          if (streams.length > 0) {
-            streamUrl = streams[0].url;
-            mimeType = streams[0].type || 'audio/mp4';
-            break;
-          }
-        } catch {
-          continue;
-        }
-      }
+      streamUrl = await getDeezerPreview(track.title, track.artist);
     }
 
     if (!streamUrl) {
       setError(`Failed to find stream for ${track.title}`);
       setDownloading((prev) => {
         const next = new Set(prev);
-        next.delete(videoId);
+        next.delete(id);
         return next;
       });
       return;
@@ -106,7 +71,7 @@ export function useOfflineCache() {
 
       await db.transaction('rw', db.audioCache, db.tracks, async () => {
         await db.audioCache.put({
-          videoId,
+          id,
           blob,
           mimeType,
           cachedAt: Date.now(),
@@ -124,15 +89,15 @@ export function useOfflineCache() {
     } finally {
       setDownloading((prev) => {
         const next = new Set(prev);
-        next.delete(videoId);
+        next.delete(id);
         return next;
       });
     }
   }, [isCached]);
 
-  const removeTrack = useCallback(async (videoId) => {
+  const removeTrack = useCallback(async (id) => {
     try {
-      await db.audioCache.delete(videoId);
+      await db.audioCache.delete(id);
     } catch (err) {
       console.error('Remove error:', err);
       setError('Failed to remove track');

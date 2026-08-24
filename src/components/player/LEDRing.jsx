@@ -8,8 +8,8 @@ export default function LEDRing() {
       <svg width="100%" height="100%" viewBox="0 0 100 100" className="overflow-visible">
         <defs>
           <linearGradient id="neon-ring-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="var(--color-purple)" />
-            <stop offset="100%" stopColor="var(--color-cyan)" />
+            <stop offset="0%" stopColor="var(--color-brass)" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="var(--color-brass-dark)" stopOpacity="0.4" />
           </linearGradient>
         </defs>
         <circle 
@@ -18,7 +18,7 @@ export default function LEDRing() {
           r="49" 
           fill="none" 
           stroke="url(#neon-ring-gradient)" 
-          strokeWidth="0.5" 
+          strokeWidth="0.8" 
           className={isPlaying ? 'led-ring-active' : 'led-ring-idle'}
           style={{ transition: 'all 1s ease' }}
         />
