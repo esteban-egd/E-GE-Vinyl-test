@@ -3,20 +3,23 @@ import { useAudio } from '../../context/AudioContext';
 
 /**
  * YouTubeIframeEngine
- * Lecteur YouTube invisible mais valide pour l'API YouTube (contourne le blocage 1px/opacity).
+ * Lecteur YouTube invisible, optimisé pour contourner les erreurs cross-origin postMessage sur Vercel.
  */
 export default function YouTubeIframe() {
   const { setIframePlayer, onIframeStateChange, onIframeError } = useAudio();
   const containerRef = useRef(null);
   const playerRef = useRef(null);
+  const isInitializingRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     function initPlayer() {
-      if (playerRef.current) return;
+      if (playerRef.current || isInitializingRef.current) return;
       if (!window.YT || !window.YT.Player) return;
       if (!containerRef.current) return;
+
+      isInitializingRef.current = true;
 
       try {
         new window.YT.Player(containerRef.current, {
@@ -33,11 +36,12 @@ export default function YouTubeIframe() {
             rel: 0,
             iv_load_policy: 3,
             enablejsapi: 1,
-            origin: window.location.origin,
+            // Ne pas forcer 'origin' dans playerVars pour éviter les rejets postMessage cross-origin sur Vercel
           },
           events: {
             onReady: (event) => {
               playerRef.current = event.target;
+              isInitializingRef.current = false;
               if (setIframePlayer) {
                 setIframePlayer(event.target);
               }
@@ -49,6 +53,7 @@ export default function YouTubeIframe() {
             },
             onError: (event) => {
               console.warn('[YouTubeIframeEngine] Erreur code:', event.data);
+              isInitializingRef.current = false;
               if (onIframeError) {
                 onIframeError(event.data);
               }
@@ -57,6 +62,7 @@ export default function YouTubeIframe() {
         });
       } catch (err) {
         console.warn('[YouTubeIframeEngine] Erreur initialisation:', err);
+        isInitializingRef.current = false;
       }
     }
 
@@ -64,8 +70,10 @@ export default function YouTubeIframe() {
       initPlayer();
     } else {
       const scriptId = 'youtube-iframe-api-script';
-      if (!document.getElementById(scriptId)) {
-        const tag = document.createElement('script');
+      let tag = document.getElementById(scriptId);
+
+      if (!tag) {
+        tag = document.createElement('script');
         tag.id = scriptId;
         tag.src = 'https://www.youtube.com/iframe_api';
         const firstScriptTag = document.getElementsByTagName('script')[0];
@@ -76,9 +84,11 @@ export default function YouTubeIframe() {
         }
       }
 
-      const prevOnReady = window.onYouTubeIframeAPIReady;
+      const existingCallback = window.onYouTubeIframeAPIReady;
       window.onYouTubeIframeAPIReady = () => {
-        if (typeof prevOnReady === 'function') prevOnReady();
+        if (typeof existingCallback === 'function') {
+          existingCallback();
+        }
         initPlayer();
       };
     }
@@ -89,6 +99,7 @@ export default function YouTubeIframe() {
           playerRef.current.destroy();
           playerRef.current = null;
         }
+        isInitializingRef.current = false;
         if (setIframePlayer) {
           setIframePlayer(null);
         }
