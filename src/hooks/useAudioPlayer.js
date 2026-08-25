@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import db from '../lib/db';
-import { getHdArtwork, getMainArtistName, isLiveTrack, isClipTrack, scoreAudioTrack } from '../services/musicDataService';
+import { getHdArtwork, getMainArtistName, isLiveTrack, isClipTrack, scoreAudioTrack, extractYouTubeId } from '../services/musicDataService';
 import { getLyraAudioStream } from '../services/lyraAudio';
 import { searchLyraTracks } from '../services/lyraSearch';
 
@@ -521,9 +521,13 @@ export function useAudioPlayer() {
   const play = useCallback(async (rawTrack) => {
     if (!rawTrack) return;
 
+    const initialVideoId = extractYouTubeId(rawTrack.videoId || rawTrack.id || '');
+
     const trackMeta = {
       ...rawTrack,
-      thumbnail: getHdArtwork(rawTrack.thumbnail, rawTrack.videoId)
+      id: initialVideoId || rawTrack.id,
+      videoId: initialVideoId,
+      thumbnail: getHdArtwork(rawTrack.thumbnail, initialVideoId)
     };
 
     // 1. Déblocage audio immédiat
@@ -598,7 +602,9 @@ export function useAudioPlayer() {
         }
 
         if (bestMatch && bestMatch.videoId && bestScore > -2000) {
-          trackMeta.videoId = bestMatch.videoId;
+          const matchedId = extractYouTubeId(bestMatch.videoId);
+          trackMeta.videoId = matchedId;
+          trackMeta.id = matchedId;
           if (cleanTitle) {
             trackMeta.title = cleanTitle;
           }
@@ -610,6 +616,9 @@ export function useAudioPlayer() {
         console.warn('[AudioEngine] Erreur résolution audio studio:', err);
       }
     }
+
+    // Sécurisation finale du videoId avant transmission aux moteurs
+    trackMeta.videoId = extractYouTubeId(trackMeta.videoId);
 
     // 4. Distinction Environnement Native (.exe / .apk) vs Web (Vercel)
     if (isNative) {
@@ -634,7 +643,7 @@ export function useAudioPlayer() {
     }
 
     // En mode Web (Vercel) : Utilisation immédiate de YouTube Iframe API pour zéro latence et contournement CORS/Cloud IP
-    if (trackMeta.videoId) {
+    if (trackMeta.videoId && trackMeta.videoId.length === 11) {
       activeEngineRef.current = 'iframe';
       if (iframePlayerRef.current && typeof iframePlayerRef.current.loadVideoById === 'function') {
         try {
@@ -726,9 +735,12 @@ export function useAudioPlayer() {
   }, [handleTrackEnded, resume, pause, playNext, playPrevious, seek]);
 
   const addToQueue = useCallback((track) => {
+    const vId = extractYouTubeId(track.videoId || track.id || '');
     const formatted = {
       ...track,
-      thumbnail: getHdArtwork(track.thumbnail, track.videoId)
+      id: vId || track.id,
+      videoId: vId,
+      thumbnail: getHdArtwork(track.thumbnail, vId)
     };
     setQueue((prev) => [...prev, formatted]);
   }, []);
@@ -743,10 +755,15 @@ export function useAudioPlayer() {
   }, []);
 
   const setQueueAndPlay = useCallback((tracks, startIndex = 0) => {
-    const formattedTracks = tracks.map(t => ({
-      ...t,
-      thumbnail: getHdArtwork(t.thumbnail, t.videoId)
-    }));
+    const formattedTracks = tracks.map(t => {
+      const vId = extractYouTubeId(t.videoId || t.id || '');
+      return {
+        ...t,
+        id: vId || t.id,
+        videoId: vId,
+        thumbnail: getHdArtwork(t.thumbnail, vId)
+      };
+    });
     setQueue(formattedTracks);
     setQueueIndex(startIndex);
     if (formattedTracks[startIndex]) {

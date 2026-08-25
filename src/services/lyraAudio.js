@@ -3,6 +3,42 @@
  * Intégration Innertube, Invidious, Piped et Serverless Vercel
  */
 
+/**
+ * Extrait systématiquement l'ID YouTube valide de 11 caractères
+ * (gère les URLs complètes, raccourcies youtu.be, shorts, embeds, et IDs directs).
+ */
+export function extractYouTubeId(urlOrId) {
+  if (!urlOrId || typeof urlOrId !== 'string') return '';
+  const clean = urlOrId.trim();
+
+  // Déjà un ID YouTube strict de 11 caractères
+  if (/^[a-zA-Z0-9_-]{11}$/.test(clean)) {
+    return clean;
+  }
+
+  // URLs YouTube standards (youtube.com, youtu.be, music.youtube.com, etc.)
+  const urlPatterns = [
+    /(?:v=|vi=|\/v\/|\/vi\/|\/embed\/|\/shorts\/|\/tracks\/|youtu\.be\/|\/watch\?v=|\/live\/)([a-zA-Z0-9_-]{11})/i,
+    /[?&]v=([a-zA-Z0-9_-]{11})/i,
+    /\/([a-zA-Z0-9_-]{11})(?:\?|&|$)/
+  ];
+
+  for (const pattern of urlPatterns) {
+    const match = clean.match(pattern);
+    if (match && match[1] && match[1].length === 11) {
+      return match[1];
+    }
+  }
+
+  // Fallback : recherche d'une séquence de 11 caractères
+  const genericMatch = clean.match(/([a-zA-Z0-9_-]{11})/);
+  if (genericMatch && genericMatch[1]) {
+    return genericMatch[1];
+  }
+
+  return clean;
+}
+
 // Instances Invidious fiables pour la recherche et le streaming
 export const INVIDIOUS_INSTANCES = [
   'https://invidious.nerdvpn.de',

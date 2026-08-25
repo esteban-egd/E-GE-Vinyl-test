@@ -1,3 +1,5 @@
+import { extractYouTubeId } from './lyraAudio';
+
 const YT_MUSIC_SEARCH_URL = "https://music.youtube.com/youtubei/v1/search";
 
 const INNERTUBE_CONTEXT = {
@@ -40,10 +42,11 @@ export async function searchLyraTracks(query) {
     return rawItems.map(item => {
       const track = item.musicResponsiveListItemRenderer;
       if (!track) return null;
-      const videoId = track.playlistItemData?.videoId || 
+      const rawVideoId = track.playlistItemData?.videoId || 
                       track.doubleColumnItemRenderer?.navigationalEndpoint?.watchEndpoint?.videoId ||
                       track.navigationEndpoint?.watchEndpoint?.videoId ||
                       track.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId;
+      const videoId = extractYouTubeId(rawVideoId);
       const title = track.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text;
       const rawArtistRuns = track.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
       const categoryWords = ['titre', 'chanson', 'single', 'vidéo', 'video', 'artiste', 'artist', 'song', 'track', 'ep', 'album'];
@@ -90,15 +93,18 @@ export async function searchLyraTracks(query) {
         if (!res.ok) continue;
         const data = await res.json();
         if (data.items && Array.isArray(data.items)) {
-          return data.items.map(i => ({
-            id: i.videoId || i.url?.replace('/watch?v=', ''),
-            videoId: i.videoId || i.url?.replace('/watch?v=', ''),
-            title: i.title,
-            artist: i.uploaderName || i.uploader || '',
-            thumbnail: i.thumbnail || (i.thumbnails?.[0]?.url) || '',
-            duration: i.duration || 0,
-            source: 'youtube-music'
-          })).filter(t => t.videoId && t.title);
+          return data.items.map(i => {
+            const vId = extractYouTubeId(i.videoId || i.url);
+            return {
+              id: vId,
+              videoId: vId,
+              title: i.title,
+              artist: i.uploaderName || i.uploader || '',
+              thumbnail: i.thumbnail || (i.thumbnails?.[0]?.url) || '',
+              duration: i.duration || 0,
+              source: 'youtube-music'
+            };
+          }).filter(t => t.videoId && t.title);
         }
       } catch {
         continue;

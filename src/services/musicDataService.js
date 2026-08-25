@@ -4,7 +4,8 @@
  * iTunes/Apple Music 4K Artwork and multi-source streaming.
  */
 
-import { getLyraAudioStream, searchYouTubeMusic } from './lyraAudio';
+import { getLyraAudioStream, searchYouTubeMusic, extractYouTubeId } from './lyraAudio';
+export { extractYouTubeId };
 
 const memoryCache = new Map();
 
