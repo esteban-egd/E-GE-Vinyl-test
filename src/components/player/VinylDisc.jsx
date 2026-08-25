@@ -1,5 +1,4 @@
 import { useAudio } from '../../context/AudioContext';
-import TrackImage from '../common/TrackImage';
 
 export default function VinylDisc({ thumbnail, speed = 33, rotationAngle = 0, isDragging = false }) {
   const { isPlaying, isLoading } = useAudio();
@@ -82,10 +81,18 @@ export default function VinylDisc({ thumbnail, speed = 33, rotationAngle = 0, is
         >
           {/* Pochette de l'album en fond avec floutage chic */}
           {thumbnail ? (
-            <TrackImage 
+            <img 
               src={thumbnail}
               alt="Pochette Vinyle"
               className="absolute inset-0 w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                if (e.currentTarget.src.includes('hqdefault.jpg')) {
+                  e.currentTarget.src = e.currentTarget.src.replace('hqdefault.jpg', 'mqdefault.jpg');
+                } else if (e.currentTarget.src.includes('mqdefault.jpg')) {
+                  e.currentTarget.src = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&auto=format&fit=crop&q=80';
+                }
+              }}
             />
           ) : (
             <div className="absolute inset-0 bg-stone-950 opacity-40" />

@@ -8,15 +8,26 @@ import { searchLyraTracks } from '../services/lyraSearch';
 // Silence WAV 1ms Base64 pour débloquer l'audio Safari iOS instantanément
 const SILENT_AUDIO_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 
+/**
+ * Détecte si l'application tourne dans un environnement natif (.exe, .apk, Electron, Capacitor, Tauri)
+ * ou sur le Web standard (Vercel / navigateur).
+ */
+export function isNativeEnvironment() {
+  if (typeof window === 'undefined') return false;
+  const isElectron = Boolean(window.process?.versions?.electron || window.electron);
+  const isCapacitor = Boolean(window.Capacitor?.isNativePlatform?.() || window.Capacitor);
+  const isCordova = Boolean(window.cordova);
+  const isTauri = Boolean(window.__TAURI__);
+  const isAndroidApp = Boolean(window.Android || window.AndroidBridge);
+  const isLocalFile = window.location.protocol === 'file:';
+  return isElectron || isCapacitor || isCordova || isTauri || isAndroidApp || isLocalFile;
+}
+
 // --- Moteur de Synthèse d'Ambiance Vinyle (Crachotements & Rumble Analogique) ---
 let vinylAudioContext = null;
 let vinylCrackleSource = null;
 let vinylHumSource = null;
 let vinylGainNode = null;
-
-// --- Moteur DSP Haute Résolution Réel (AptX-HD Lossless 24-bit/96kHz EQ) ---
-let musicAudioContext = null;
-let musicSourceNode = null;
 let analyserNode = null;
 
 function startVinylNoise(volumeValue) {
@@ -110,6 +121,7 @@ function stopVinylNoise() {
 }
 
 export function useAudioPlayer() {
+  const isNative = isNativeEnvironment();
   const audioRef = useRef(null);
   const iframePlayerRef = useRef(null);
   const activeEngineRef = useRef('none'); // 'iframe' | 'audio' | 'none'
@@ -143,7 +155,7 @@ export function useAudioPlayer() {
     };
   }, []);
 
-  // Audiophile Options
+  // Options audiophiles
   const [hifiMode, setHifiMode] = useState(true);
   const [vinylCrackle, setVinylCrackle] = useState(true);
   const [vinylCrackleVolume, setVinylCrackleVolume] = useState(0.12);
@@ -201,7 +213,7 @@ export function useAudioPlayer() {
     };
   }, []);
 
-  // --- Synchronisation Périodique (YouTube Iframe & Progression) ---
+  // --- Synchronisation Périodique de l'avancement temporel ---
   useEffect(() => {
     if (syncTimerRef.current) {
       clearInterval(syncTimerRef.current);
@@ -250,17 +262,22 @@ export function useAudioPlayer() {
     };
   }, []);
 
-  // --- Configuration Élément Audio Direct ---
+  // --- Initialisation de la balise HTML5 Audio ---
   useEffect(() => {
-    let audio = document.getElementById('global-player');
-    if (!audio) {
-      audio = new Audio();
-      audio.id = 'global-player';
-      audio.preload = 'auto';
-      audio.setAttribute('playsinline', 'true');
-      document.body.appendChild(audio);
+    if (!audioRef.current) {
+      let el = document.getElementById('global-player');
+      if (!el) {
+        el = document.createElement('audio');
+        el.id = 'global-player';
+        el.style.display = 'none';
+        el.preload = 'auto';
+        el.crossOrigin = 'anonymous';
+        document.body.appendChild(el);
+      }
+      audioRef.current = el;
     }
-    audioRef.current = audio;
+
+    const audio = audioRef.current;
 
     const onTimeUpdate = () => {
       if (activeEngineRef.current === 'audio') {
@@ -268,7 +285,7 @@ export function useAudioPlayer() {
       }
     };
     const onDurationChange = () => {
-      if (activeEngineRef.current === 'audio' && audio.duration) {
+      if (activeEngineRef.current === 'audio' && !isNaN(audio.duration)) {
         setDuration(audio.duration);
       }
     };
@@ -276,6 +293,7 @@ export function useAudioPlayer() {
       if (activeEngineRef.current === 'audio') {
         setIsPlaying(true);
         setIsLoading(false);
+        setError(null);
       }
     };
     const onPause = () => {
@@ -300,7 +318,7 @@ export function useAudioPlayer() {
     };
     const onError = () => {
       if (activeEngineRef.current === 'audio') {
-        console.warn('[AudioEngine] Erreur audio HTML5, essai YouTube fallback...');
+        console.warn('[AudioEngine] Erreur audio HTML5, essai YouTube Iframe fallback...');
         if (currentTrack?.videoId && iframePlayerRef.current) {
           activeEngineRef.current = 'iframe';
           iframePlayerRef.current.loadVideoById(currentTrack.videoId, 0);
@@ -338,7 +356,6 @@ export function useAudioPlayer() {
     console.log('[AudioEngine] Iframe Player enregistré avec succès');
     iframePlayerRef.current = player;
     
-    // Si un morceau attendait l'initialisation du lecteur
     if (pendingTrackRef.current) {
       const track = pendingTrackRef.current;
       pendingTrackRef.current = null;
@@ -373,14 +390,12 @@ export function useAudioPlayer() {
   const onIframeError = useCallback(async (code) => {
     console.warn('[AudioEngine] Erreur YouTube code:', code);
     if (currentTrack) {
-      // Tenter une alternative Lyra Audio Stream complète
       try {
         const streamUrl = await getLyraAudioStream(currentTrack.videoId, currentTrack.title, currentTrack.artist);
         if (streamUrl && audioRef.current) {
           console.log('[AudioEngine] Passage au flux de secours audio direct');
           activeEngineRef.current = 'audio';
           
-          // Si le flux est déjà sur notre endpoint /api/stream ou en HTTPS direct
           const finalUrl = streamUrl.startsWith('http://') ? streamUrl.replace('http://', 'https://') : streamUrl;
           
           audioRef.current.src = finalUrl;
@@ -431,7 +446,6 @@ export function useAudioPlayer() {
   useEffect(() => {
     if (!isPlaying || isLoading || activeEngineRef.current !== 'iframe') return;
 
-    // Si après 6 secondes on est toujours à 00:00 alors qu'on est censé jouer
     const watchdog = setTimeout(() => {
       if (currentTime === 0 && isPlaying && !isLoading) {
         console.warn('[AudioEngine] Blocage 00:00 détecté sur IFrame, passage au fallback...');
@@ -449,73 +463,48 @@ export function useAudioPlayer() {
       const session = navigator.mediaSession;
       session.setActionHandler('play', () => actionsRef.current.resume?.());
       session.setActionHandler('pause', () => actionsRef.current.pause?.());
-      session.setActionHandler('previoustrack', () => actionsRef.current.prev?.());
       session.setActionHandler('nexttrack', () => actionsRef.current.next?.());
+      session.setActionHandler('previoustrack', () => actionsRef.current.prev?.());
       session.setActionHandler('seekto', (details) => {
-        if (details?.seekTime !== undefined) {
+        if (details.seekTime !== undefined) {
           actionsRef.current.seek?.(details.seekTime);
         }
       });
-    } catch {}
+    } catch (_) {}
   }, []);
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
-    try {
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-    } catch {}
-  }, [isPlaying]);
-
-  // --- Contrôles Playback Universels ---
+  // --- Contrôles de Lecture (Pause / Reprise / Seek) ---
   const pause = useCallback(() => {
+    setIsPlaying(false);
     if (activeEngineRef.current === 'iframe' && iframePlayerRef.current?.pauseVideo) {
       try { iframePlayerRef.current.pauseVideo(); } catch {}
+    } else if (activeEngineRef.current === 'audio' && audioRef.current) {
+      audioRef.current.pause();
     }
-    if (audioRef.current) {
-      try { audioRef.current.pause(); } catch {}
-    }
-    setIsPlaying(false);
   }, []);
 
-  const resume = useCallback(async () => {
-    if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
-      try { navigator.audioSession.type = 'playback'; } catch {}
-    }
-
+  const resume = useCallback(() => {
+    if (!currentTrack) return;
+    setIsPlaying(true);
     if (activeEngineRef.current === 'iframe' && iframePlayerRef.current?.playVideo) {
-      try {
-        iframePlayerRef.current.playVideo();
-        setIsPlaying(true);
-        return;
-      } catch {}
+      try { iframePlayerRef.current.playVideo(); } catch {}
+    } else if (activeEngineRef.current === 'audio' && audioRef.current) {
+      audioRef.current.play().catch(() => {});
     }
+  }, [currentTrack]);
 
-    if (audioRef.current && audioRef.current.src && audioRef.current.src !== SILENT_AUDIO_URI) {
-      try {
-        await audioRef.current.play();
-        setIsPlaying(true);
-        return;
-      } catch (err) {
-        console.error('[AudioEngine] Erreur resume audio:', err);
-      }
-    }
-  }, []);
-
-  const seek = useCallback((time) => {
-    const target = Math.max(0, time);
-    setCurrentTime(target);
-
+  const seek = useCallback((seconds) => {
+    const time = Math.max(0, Math.min(seconds, duration || 99999));
+    setCurrentTime(time);
     if (activeEngineRef.current === 'iframe' && iframePlayerRef.current?.seekTo) {
-      try {
-        iframePlayerRef.current.seekTo(target, true);
-      } catch {}
-    } else if (audioRef.current) {
-      audioRef.current.currentTime = target;
+      try { iframePlayerRef.current.seekTo(time, true); } catch {}
+    } else if (activeEngineRef.current === 'audio' && audioRef.current) {
+      audioRef.current.currentTime = time;
     }
-  }, []);
+  }, [duration]);
 
-  const setVolume = useCallback((v) => {
-    const clamped = Math.max(0, Math.min(1, v));
+  const setVolume = useCallback((val) => {
+    const clamped = Math.max(0, Math.min(1, val));
     setVolumeState(clamped);
 
     if (audioRef.current) {
@@ -528,7 +517,7 @@ export function useAudioPlayer() {
     }
   }, []);
 
-  // --- Moteur Central de Lecture Universel (Zéro Latence) ---
+  // --- Moteur Central de Lecture Universel (Zéro Latence & Mode-Aware) ---
   const play = useCallback(async (rawTrack) => {
     if (!rawTrack) return;
 
@@ -577,16 +566,14 @@ export function useAudioPlayer() {
     const userWantsLive = isLiveTrack(trackMeta.title);
     const isClip = isClipTrack(trackMeta.title);
 
-    // Résoudre ou corriger si c'est un ID non-YouTube, si la piste contient un mot live, ou si c'est un clip vidéo
     if (isNonYoutubeId || userWantsLive || isClip) {
       try {
         const cleanArtist = getMainArtistName(trackMeta.artist);
         const cleanTitle = (trackMeta.title || '')
           .replace(/\b(live|en concert|in concert|live at|live in|live performance|live session|unplugged|en direct|live version|concert|tv show|festival|tour|bootleg|live recording|session live|bbc sessions)\b.*/i, '')
-          .replace(/\s*[\(\[\{].*?[\)\]\}]/g, '')
+          .replace(/[\(\[\{].*?[\)\]\}]/g, '')
           .trim();
 
-        // Établir une liste de requêtes de recherche progressives pour trouver l'audio officiel
         const searchQueries = [
           `${cleanTitle} ${cleanArtist} official audio`,
           `${cleanTitle} ${cleanArtist} audio`,
@@ -607,27 +594,46 @@ export function useAudioPlayer() {
               }
             }
           }
-          // Si on a trouvé un candidat excellent (score élevé), on s'arrête
-          if (bestScore > 1000) {
-            break;
-          }
+          if (bestScore > 1000) break;
         }
 
         if (bestMatch && bestMatch.videoId && bestScore > -2000) {
           trackMeta.videoId = bestMatch.videoId;
           if (cleanTitle) {
-            trackMeta.title = cleanTitle; // Restaurer le titre studio épuré
+            trackMeta.title = cleanTitle;
           }
           if (bestMatch.thumbnail && !trackMeta.thumbnail) {
             trackMeta.thumbnail = bestMatch.thumbnail;
           }
         }
       } catch (err) {
-        console.warn('[AudioEngine] Erreur résolution audio studio non-clip :', err);
+        console.warn('[AudioEngine] Erreur résolution audio studio:', err);
       }
     }
 
-    // 4. Lecture YouTube Iframe Universelle (Priorité 1: 100% stable sans restriction)
+    // 4. Distinction Environnement Native (.exe / .apk) vs Web (Vercel)
+    if (isNative) {
+      // En mode Native (.exe / .apk) : extraction directe haute fidélité via lyraAudio.js
+      try {
+        const streamUrl = await getLyraAudioStream(trackMeta.videoId, trackMeta.title, trackMeta.artist);
+        if (streamUrl && audioRef.current) {
+          activeEngineRef.current = 'audio';
+          if (iframePlayerRef.current?.pauseVideo) {
+            iframePlayerRef.current.pauseVideo();
+          }
+          audioRef.current.src = streamUrl;
+          audioRef.current.currentTime = 0;
+          await audioRef.current.play();
+          setIsPlaying(true);
+          setIsLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.warn('[AudioEngine Native] Échec flux direct, bascule sur YouTube Iframe:', err);
+      }
+    }
+
+    // En mode Web (Vercel) : Utilisation immédiate de YouTube Iframe API pour zéro latence et contournement CORS/Cloud IP
     if (trackMeta.videoId) {
       activeEngineRef.current = 'iframe';
       if (iframePlayerRef.current && typeof iframePlayerRef.current.loadVideoById === 'function') {
@@ -642,7 +648,6 @@ export function useAudioPlayer() {
           pendingTrackRef.current = trackMeta;
         }
       } else {
-        // En attente de l'initialisation du lecteur YouTube
         console.log('[AudioEngine] Iframe en cours de chargement, mise en attente...');
         pendingTrackRef.current = trackMeta;
       }
@@ -652,7 +657,7 @@ export function useAudioPlayer() {
     try {
       await db.tracks.put({ ...trackMeta, addedAt: Date.now() });
     } catch {}
-  }, [updateMediaSessionMetadata, volume]);
+  }, [isNative, updateMediaSessionMetadata, volume]);
 
   const playFromQueue = useCallback(async (index) => {
     if (index >= 0 && index < queue.length) {
@@ -747,13 +752,11 @@ export function useAudioPlayer() {
   const isCurrentTrack = useCallback((track) => {
     if (!currentTrack || !track) return false;
     
-    // 1. Comparaison par ID ou videoId
     if (track.videoId && currentTrack.videoId && track.videoId === currentTrack.videoId) return true;
     if (track.id && currentTrack.id && track.id === currentTrack.id) return true;
     if (track.id && currentTrack.videoId && track.id === currentTrack.videoId) return true;
     if (track.videoId && currentTrack.id && track.videoId === currentTrack.id) return true;
 
-    // 2. Comparaison par Titre et Artiste principal
     if (track.title && currentTrack.title) {
       const t1 = track.title.toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').trim();
       const t2 = currentTrack.title.toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').trim();
@@ -780,17 +783,38 @@ export function useAudioPlayer() {
   }, []);
 
   return {
-    isPlaying,
-    isLoading,
+    // Fonctions et états essentiels du lecteur
+    play,
+    pause,
+    resume,
+    seekTo: seek,
+    seek,
     currentTime,
     duration,
-    volume,
+    isPlaying,
+    isLoading,
     currentTrack,
+    volume,
+    setVolume,
+    togglePlayPause,
     isCurrentTrack,
+    isNative,
+
+    // Gestion de file d'attente et navigation
     queue,
     queueIndex,
     shuffle,
     repeat,
+    playNext,
+    playPrevious,
+    addToQueue,
+    removeFromQueue,
+    clearQueue,
+    setQueueAndPlay,
+    toggleShuffle,
+    toggleRepeat,
+
+    // États et options audio vintage
     error,
     isOffline,
     isPlayerModalOpen,
@@ -813,20 +837,6 @@ export function useAudioPlayer() {
     tubeSaturation,
     setTubeSaturation,
     getAnalyserData,
-    play,
-    pause,
-    resume,
-    togglePlayPause,
-    seek,
-    setVolume,
-    playNext,
-    playPrevious,
-    addToQueue,
-    removeFromQueue,
-    clearQueue,
-    setQueueAndPlay,
-    toggleShuffle,
-    toggleRepeat,
     setIframePlayer,
     onIframeStateChange,
     onIframeError,

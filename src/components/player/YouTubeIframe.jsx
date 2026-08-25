@@ -1,6 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { useAudio } from '../../context/AudioContext';
 
+/**
+ * YouTubeIframeEngine
+ * Moteur YouTube Iframe invisible pour la lecture Web instantanée sans blocage réseau.
+ */
 export default function YouTubeIframe() {
   const { setIframePlayer, onIframeStateChange, onIframeError } = useAudio();
   const playerRef = useRef(null);
@@ -9,16 +13,16 @@ export default function YouTubeIframe() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    function createYTPlayer() {
+    function initPlayer() {
       if (playerRef.current || isInitializedRef.current) return;
       if (!window.YT || !window.YT.Player) return;
 
-      const container = document.getElementById('yt-player-container');
+      const container = document.getElementById('yt-hidden-engine');
       if (!container) return;
 
       isInitializedRef.current = true;
       try {
-        new window.YT.Player('yt-player-container', {
+        new window.YT.Player('yt-hidden-engine', {
           height: '100%',
           width: '100%',
           videoId: '',
@@ -36,7 +40,6 @@ export default function YouTubeIframe() {
           },
           events: {
             onReady: (event) => {
-              console.log('[YouTubeIframe] Moteur YouTube Iframe Player prêt.');
               playerRef.current = event.target;
               if (setIframePlayer) {
                 setIframePlayer(event.target);
@@ -48,7 +51,7 @@ export default function YouTubeIframe() {
               }
             },
             onError: (event) => {
-              console.warn('[YouTubeIframe] Erreur YouTube Player:', event.data);
+              console.warn('[YouTubeIframeEngine] Erreur code:', event.data);
               if (onIframeError) {
                 onIframeError(event.data);
               }
@@ -56,12 +59,12 @@ export default function YouTubeIframe() {
           },
         });
       } catch (err) {
-        console.warn('[YouTubeIframe] Erreur création YT Player:', err);
+        console.warn('[YouTubeIframeEngine] Erreur initialisation:', err);
       }
     }
 
     if (window.YT && window.YT.Player) {
-      createYTPlayer();
+      initPlayer();
     } else {
       const scriptId = 'youtube-iframe-api-script';
       if (!document.getElementById(scriptId)) {
@@ -76,27 +79,33 @@ export default function YouTubeIframe() {
         }
       }
 
+      const prevOnReady = window.onYouTubeIframeAPIReady;
       window.onYouTubeIframeAPIReady = () => {
-        createYTPlayer();
+        if (typeof prevOnReady === 'function') prevOnReady();
+        initPlayer();
       };
     }
   }, [setIframePlayer, onIframeStateChange, onIframeError]);
 
   return (
     <div
-      id="yt-player-host"
+      id="yt-hidden-host"
+      aria-hidden="true"
       style={{
         position: 'fixed',
-        bottom: '0px',
-        right: '0px',
-        width: '200px',
-        height: '200px',
+        bottom: '0',
+        right: '0',
+        width: '1px',
+        height: '1px',
         opacity: '0.001',
         pointerEvents: 'none',
         zIndex: -1,
+        overflow: 'hidden',
       }}
     >
-      <div id="yt-player-container" className="w-full h-full" />
+      <div id="yt-hidden-engine" className="w-full h-full" />
     </div>
   );
 }
+
+export const YouTubeIframeEngine = YouTubeIframe;
