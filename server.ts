@@ -62,6 +62,152 @@ async function startServer() {
     }
   });
 
+  // Direct Unified YouTube Search Proxy
+  app.get("/api/youtube-search", async (req, res) => {
+    try {
+      const q = (req.query.q as string || "").trim();
+      if (!q) return res.status(400).json({ error: "Missing query q" });
+
+      const tracks: Array<{ id: string; videoId: string; title: string; artist: string; thumbnail: string }> = [];
+      const seenIds = new Set<string>();
+
+      // 1. YouTube Web Search (videoRenderer)
+      try {
+        const ytRes = await fetch("https://www.youtube.com/youtubei/v1/search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+          },
+          body: JSON.stringify({
+            context: {
+              client: {
+                clientName: "WEB",
+                clientVersion: "2.20240101.00.00",
+                hl: "fr",
+                gl: "FR"
+              }
+            },
+            query: q
+          })
+        });
+
+        if (ytRes.ok) {
+          const data = await ytRes.json();
+          const contents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+          for (const section of contents) {
+            const itemContents = section?.itemSectionRenderer?.contents || [];
+            for (const item of itemContents) {
+              const v = item?.videoRenderer;
+              if (v && v.videoId && !seenIds.has(v.videoId)) {
+                seenIds.add(v.videoId);
+                const title = v.title?.runs?.[0]?.text || v.title?.simpleText || '';
+                const artist = v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || '';
+                const thumb = v.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+                tracks.push({
+                  id: v.videoId,
+                  videoId: v.videoId,
+                  title,
+                  artist,
+                  thumbnail: thumb
+                });
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn("[Server] YT WEB Search error:", err.message);
+      }
+
+      // 2. YouTube Music Search (WEB_REMIX)
+      try {
+        const ytmRes = await fetch("https://music.youtube.com/youtubei/v1/search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "X-YouTube-Client-Name": "67",
+            "X-YouTube-Client-Version": "1.20240801.01.00",
+            "Origin": "https://music.youtube.com",
+            "Referer": "https://music.youtube.com/"
+          },
+          body: JSON.stringify({
+            context: {
+              client: {
+                clientName: "WEB_REMIX",
+                clientVersion: "1.20240801.01.00",
+                hl: "fr",
+                gl: "FR"
+              }
+            },
+            query: q
+          })
+        });
+
+        if (ytmRes.ok) {
+          const data = await ytmRes.json();
+          let sections = data?.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+          if (!sections.length && data?.contents?.sectionListRenderer?.contents) {
+            sections = data.contents.sectionListRenderer.contents;
+          }
+
+          for (const section of sections) {
+            // Check musicCardShelfRenderer (Top Result)
+            const card = section?.musicCardShelfRenderer;
+            if (card) {
+              const videoId = card.buttons?.find((b: any) => b?.buttonRenderer?.command?.watchEndpoint?.videoId)?.buttonRenderer?.command?.watchEndpoint?.videoId ||
+                              card.title?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId ||
+                              card.subtitle?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId;
+              if (videoId && !seenIds.has(videoId)) {
+                seenIds.add(videoId);
+                const title = card.title?.runs?.[0]?.text || '';
+                const artist = card.subtitle?.runs?.map((r: any) => r.text).join('') || '';
+                tracks.unshift({
+                  id: videoId,
+                  videoId,
+                  title,
+                  artist,
+                  thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+                });
+              }
+            }
+
+            // Check musicShelfRenderer
+            const items = section?.musicShelfRenderer?.contents || [];
+            for (const item of items) {
+              const r = item?.musicResponsiveListItemRenderer;
+              if (!r) continue;
+              const videoId = r.playlistItemData?.videoId ||
+                              r.doubleTapData?.videoId ||
+                              r.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId ||
+                              r.navigationEndpoint?.watchEndpoint?.videoId;
+
+              if (videoId && !seenIds.has(videoId)) {
+                seenIds.add(videoId);
+                const title = r.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || '';
+                const artistRuns = r.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
+                const artist = artistRuns.map((a: any) => a.text).join('') || '';
+                tracks.push({
+                  id: videoId,
+                  videoId,
+                  title,
+                  artist,
+                  thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+                });
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn("[Server] YTM Search error:", err.message);
+      }
+
+      res.json(tracks);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Proxy Deezer Search (Popularity & Ranking)
   app.get("/api/deezer-search", async (req, res) => {
     try {
@@ -195,224 +341,6 @@ async function startServer() {
     } catch (err: any) {
       console.error("[Server] Innertube proxy error:", err.message);
       res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Direct Audio Stream Resolver & Proxy (/api/stream?id=... or /api/stream?url=...)
-  app.get("/api/stream", async (req, res) => {
-    try {
-      const videoId = (req.query.id || req.query.videoId) as string;
-      const targetUrl = req.query.url as string;
-
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, Authorization");
-      res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
-
-      // Mode 1 : Proxy direct
-      if (targetUrl) {
-        const headers: Record<string, string> = {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-          "Referer": "https://music.youtube.com/",
-          "Origin": "https://music.youtube.com"
-        };
-        if (req.headers.range) {
-          headers["Range"] = req.headers.range as string;
-        }
-        const upstreamRes = await fetch(targetUrl, { headers });
-        res.status(upstreamRes.status);
-        upstreamRes.headers.forEach((value, key) => {
-          const lowerKey = key.toLowerCase();
-          if (
-            lowerKey === "content-type" ||
-            lowerKey === "content-length" ||
-            lowerKey === "accept-ranges" ||
-            lowerKey === "content-range"
-          ) {
-            res.setHeader(key, value);
-          }
-        });
-        if (!upstreamRes.body) return res.end();
-        const arrayBuffer = await upstreamRes.arrayBuffer();
-        return res.send(Buffer.from(arrayBuffer));
-      }
-
-      if (!videoId) {
-        return res.status(400).json({ error: "Missing id or videoId parameter" });
-      }
-
-      // Mode 2 : Résolution du flux audio
-      const INVIDIOUS_INSTANCES = [
-        "https://invidious.nerdvpn.de",
-        "https://inv.tux.pizza",
-        "https://invidious.jing.rocks",
-        "https://invidious.privacyredirect.com",
-        "https://invidious.drgns.space",
-        "https://yt.artemislena.eu",
-        "https://invidious.projectsegfau.lt"
-      ];
-
-      const PIPED_INSTANCES = [
-        "https://pipedapi.kavin.rocks",
-        "https://api.piped.privacydev.net",
-        "https://pipedapi.adminforge.de",
-        "https://pipedapi.mha.fi",
-        "https://piped-api.lunar.icu"
-      ];
-
-      let audioStreamUrl: string | null = null;
-
-      // 1. Invidious (haute disponibilité sans rate limit cloud)
-      for (const inst of INVIDIOUS_INSTANCES) {
-        try {
-          const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
-            signal: AbortSignal.timeout(3200),
-            headers: { "User-Agent": "Mozilla/5.0 (compatible; LyraMusic/1.0)" }
-          });
-          if (invRes.ok) {
-            const data = await invRes.json();
-            const formats = [...(data.adaptiveFormats || []), ...(data.formatStreams || [])];
-            const audioFormats = formats.filter((f: any) =>
-              (f.type && f.type.includes("audio")) ||
-              (f.mimeType && f.mimeType.includes("audio"))
-            );
-            if (audioFormats.length > 0) {
-              audioFormats.sort((a: any, b: any) => {
-                const bitA = parseInt(a.bitrate || a.audioSampleRate || 0, 10);
-                const bitB = parseInt(b.bitrate || b.audioSampleRate || 0, 10);
-                return bitB - bitA;
-              });
-              if (audioFormats[0]?.url) {
-                audioStreamUrl = audioFormats[0].url.replace("http://", "https://");
-                break;
-              }
-            }
-          }
-        } catch (_) {}
-      }
-
-      // 2. Cobalt (direct)
-      if (!audioStreamUrl) {
-        try {
-          const cobaltRes = await fetch("https://api.cobalt.tools/", {
-            method: "POST",
-            headers: { "Accept": "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify({
-              url: `https://www.youtube.com/watch?v=${videoId}`,
-              downloadMode: "audio",
-              audioFormat: "mp3"
-            }),
-            signal: AbortSignal.timeout(3500)
-          });
-          if (cobaltRes.ok) {
-            const data = await cobaltRes.json();
-            if (data?.url) audioStreamUrl = data.url.replace("http://", "https://");
-          }
-        } catch (e) {}
-      }
-
-      // 3. Piped (avec tri de bitrate)
-      if (!audioStreamUrl) {
-        for (const inst of PIPED_INSTANCES) {
-          try {
-            const pipedRes = await fetch(`${inst}/streams/${videoId}`, { signal: AbortSignal.timeout(3000) });
-            if (pipedRes.ok) {
-              const data = await pipedRes.json();
-              const streams = data.audioStreams || [];
-              streams.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-              if (streams[0]?.url) {
-                audioStreamUrl = streams[0].url.replace("http://", "https://");
-                break;
-              }
-            }
-          } catch (e) {}
-        }
-      }
-
-      if (audioStreamUrl) {
-        if (req.query.redirect === "true") {
-          return res.redirect(audioStreamUrl);
-        }
-        return res.json({
-          url: audioStreamUrl,
-          videoId,
-          proxiedUrl: `/api/stream?url=${encodeURIComponent(audioStreamUrl)}`
-        });
-      }
-
-      return res.status(404).json({ error: "Audio stream not found", videoId });
-    } catch (err: any) {
-      console.error("[Server] Stream error:", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Audio Stream Proxy with Byte Range Support (Bypass CORS for HTML5 <audio>)
-  app.get("/api/stream-proxy", async (req, res) => {
-    try {
-      const targetUrl = req.query.url as string;
-      if (!targetUrl) {
-        return res.status(400).send("Missing target url parameter");
-      }
-
-      const headers: Record<string, string> = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        "Referer": "https://music.youtube.com/",
-        "Origin": "https://music.youtube.com"
-      };
-
-      if (req.headers.range) {
-        headers["Range"] = req.headers.range;
-      }
-
-      const upstreamRes = await fetch(targetUrl, { headers });
-
-      res.status(upstreamRes.status);
-      
-      upstreamRes.headers.forEach((value, key) => {
-        const lowerKey = key.toLowerCase();
-        if (
-          lowerKey === "content-type" ||
-          lowerKey === "content-length" ||
-          lowerKey === "accept-ranges" ||
-          lowerKey === "content-range"
-        ) {
-          res.setHeader(key, value);
-        }
-      });
-
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Headers", "*");
-
-      if (!upstreamRes.body) {
-        return res.end();
-      }
-
-      const reader = upstreamRes.body.getReader();
-      const stream = new ReadableStream({
-        async start(controller) {
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              controller.enqueue(value);
-            }
-            controller.close();
-          } catch (error) {
-            controller.error(error);
-          }
-        }
-      });
-
-      // Stream to Express Response
-      const responseStream = new Response(stream);
-      const arrayBuffer = await responseStream.arrayBuffer();
-      res.send(Buffer.from(arrayBuffer));
-    } catch (err: any) {
-      console.error("[Server] Stream proxy error:", err.message);
-      if (!res.headersSent) {
-        res.status(500).send("Stream proxy failed");
-      }
     }
   });
 

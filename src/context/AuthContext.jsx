@@ -26,30 +26,51 @@ export const AuthProvider = ({ children }) => {
   };
 
   useEffect(() => {
+    // Check local guest session
+    const guestUser = localStorage.getItem('ege_guest_user');
+    if (guestUser) {
+      try {
+        const parsed = JSON.parse(guestUser);
+        setUser(parsed);
+        setProfile({ full_name: 'Invité E-GE', username: 'guest' });
+        setLoading(false);
+        return;
+      } catch {}
+    }
+
     // Check active sessions and sets the user
     supabase.auth.getSession().then(({ data: { session } }) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
       if (currentUser) fetchProfile(currentUser.id);
       setLoading(false);
-    });
+    }).catch(() => setLoading(false));
 
     // Listen for changes on auth state (signed in, signed out, etc.)
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       const currentUser = session?.user ?? null;
-      setUser(currentUser);
       if (currentUser) {
+        localStorage.removeItem('ege_guest_user');
+        setUser(currentUser);
         fetchProfile(currentUser.id);
-      } else {
+      } else if (!localStorage.getItem('ege_guest_user')) {
+        setUser(null);
         setProfile(null);
       }
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => subscription?.unsubscribe?.();
   }, []);
+
+  const signInAsGuest = () => {
+    const guest = { id: 'guest-local-user', email: 'guest@ege-vinyl.local', is_guest: true };
+    localStorage.setItem('ege_guest_user', JSON.stringify(guest));
+    setUser(guest);
+    setProfile({ full_name: 'Invité E-GE', username: 'guest' });
+  };
 
   const value = {
     user,
@@ -57,9 +78,19 @@ export const AuthProvider = ({ children }) => {
     fetchProfile,
     signIn: (email, password) => supabase.auth.signInWithPassword({ email, password }),
     signUp: (email, password) => supabase.auth.signUp({ email, password }),
-    signOut: () => supabase.auth.signOut(),
+    signInAsGuest,
+    signOut: async () => {
+      localStorage.removeItem('ege_guest_user');
+      await supabase.auth.signOut();
+      setUser(null);
+      setProfile(null);
+    },
     updateProfile: async (updates) => {
       if (!user) throw new Error('No user logged in');
+      if (user.is_guest) {
+        setProfile((prev) => ({ ...prev, ...updates }));
+        return;
+      }
       const { error } = await supabase
         .from('profiles')
         .upsert({

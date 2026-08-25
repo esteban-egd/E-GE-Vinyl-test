@@ -3,7 +3,7 @@ import { useAudio } from '../../context/AudioContext';
 
 /**
  * YouTubeIframeEngine
- * Lecteur YouTube invisible, optimisé pour contourner les erreurs cross-origin postMessage sur Vercel.
+ * Moteur YouTube Iframe invisible pour la lecture Web instantanée.
  */
 export default function YouTubeIframe() {
   const { setIframePlayer, onIframeStateChange, onIframeError } = useAudio();
@@ -18,16 +18,15 @@ export default function YouTubeIframe() {
       if (playerRef.current || isInitializingRef.current) return;
       if (!window.YT || !window.YT.Player) return;
       if (!containerRef.current) return;
-
       isInitializingRef.current = true;
 
       try {
-        new window.YT.Player(containerRef.current, {
-          height: '200',
-          width: '200',
-          videoId: '',
+        playerRef.current = new window.YT.Player(containerRef.current, {
+          height: '100%',
+          width: '100%',
+          videoId: 'M7lc1UVf-VE',
           playerVars: {
-            autoplay: 1,
+            autoplay: 0,
             controls: 0,
             disablekb: 1,
             fs: 0,
@@ -36,12 +35,19 @@ export default function YouTubeIframe() {
             rel: 0,
             iv_load_policy: 3,
             enablejsapi: 1,
-            // Ne pas forcer 'origin' dans playerVars pour éviter les rejets postMessage cross-origin sur Vercel
+            origin: typeof window !== 'undefined' ? window.location.origin : undefined,
           },
           events: {
             onReady: (event) => {
-              playerRef.current = event.target;
               isInitializingRef.current = false;
+              try {
+                if (event.target && typeof event.target.getIframe === 'function') {
+                  const iframeEl = event.target.getIframe();
+                  if (iframeEl) {
+                    iframeEl.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
+                  }
+                }
+              } catch (_) {}
               if (setIframePlayer) {
                 setIframePlayer(event.target);
               }
@@ -53,16 +59,15 @@ export default function YouTubeIframe() {
             },
             onError: (event) => {
               console.warn('[YouTubeIframeEngine] Erreur code:', event.data);
-              isInitializingRef.current = false;
               if (onIframeError) {
                 onIframeError(event.data);
               }
             }
-          },
+          }
         });
       } catch (err) {
-        console.warn('[YouTubeIframeEngine] Erreur initialisation:', err);
         isInitializingRef.current = false;
+        console.warn('[YouTubeIframeEngine] Erreur initialisation:', err);
       }
     }
 
@@ -70,25 +75,21 @@ export default function YouTubeIframe() {
       initPlayer();
     } else {
       const scriptId = 'youtube-iframe-api-script';
-      let tag = document.getElementById(scriptId);
-
-      if (!tag) {
-        tag = document.createElement('script');
+      if (!document.getElementById(scriptId)) {
+        const tag = document.createElement('script');
         tag.id = scriptId;
         tag.src = 'https://www.youtube.com/iframe_api';
         const firstScriptTag = document.getElementsByTagName('script')[0];
         if (firstScriptTag && firstScriptTag.parentNode) {
           firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
         } else {
-          document.head.appendChild(tag);
+          document.body.appendChild(tag);
         }
       }
 
-      const existingCallback = window.onYouTubeIframeAPIReady;
+      const prevOnReady = window.onYouTubeIframeAPIReady;
       window.onYouTubeIframeAPIReady = () => {
-        if (typeof existingCallback === 'function') {
-          existingCallback();
-        }
+        if (typeof prevOnReady === 'function') prevOnReady();
         initPlayer();
       };
     }
@@ -99,7 +100,6 @@ export default function YouTubeIframe() {
           playerRef.current.destroy();
           playerRef.current = null;
         }
-        isInitializingRef.current = false;
         if (setIframePlayer) {
           setIframePlayer(null);
         }
@@ -115,18 +115,19 @@ export default function YouTubeIframe() {
       aria-hidden="true"
       style={{
         position: 'fixed',
-        top: '-9999px',
-        left: '-9999px',
+        bottom: 0,
+        right: 0,
         width: '200px',
         height: '200px',
+        opacity: 0.001,
         pointerEvents: 'none',
         zIndex: -9999,
-        visibility: 'visible',
+        overflow: 'hidden',
       }}
     >
-      <div ref={containerRef} id="yt-hidden-engine" style={{ width: '100%', height: '100%' }} />
+      <div style={{ width: '200px', height: '200px' }}>
+        <div ref={containerRef} id="yt-hidden-engine" className="w-full h-full" />
+      </div>
     </div>
   );
 }
-
-export const YouTubeIframeEngine = YouTubeIframe;

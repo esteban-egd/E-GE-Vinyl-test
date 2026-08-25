@@ -1,52 +1,183 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-hot-toast';
-import { Monitor, Smartphone, Mail, Lock, User, LogIn, Download, ChevronRight, X } from 'lucide-react';
+import { Mail, Lock, User, LogIn, Check, Sparkles, ShieldCheck, ArrowRight, ArrowLeft } from 'lucide-react';
+import { PRESET_AVATARS } from '../constants/avatars';
+import VinylDisc from '../components/player/VinylDisc';
+import Tonearm from '../components/player/Tonearm';
 
-// Vinyl Record Component
-const VinylRecord = () => (
-  <div className="relative w-64 h-64 md:w-80 md:h-80 mx-auto">
-    {/* Background Shadow */}
-    <div className="absolute inset-0 bg-black/40 rounded-full blur-2xl transform translate-y-4" />
+// Interactive HTML5 Canvas Constellation Background (Mirrors eguillermin.vercel.app)
+const ConstellationBackground = () => {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationFrameId;
+    let particles = [];
     
-    {/* The Record */}
-    <motion.div 
-      className="relative w-full h-full bg-[#1a1a1a] rounded-full border-4 border-[#2a2a2a] flex items-center justify-center overflow-hidden shadow-2xl"
-      animate={{ rotate: 360 }}
-      transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-    >
-      {/* Grooves */}
-      <div className="absolute inset-2 border border-white/5 rounded-full" />
-      <div className="absolute inset-4 border border-white/5 rounded-full" />
-      <div className="absolute inset-8 border border-white/5 rounded-full" />
-      <div className="absolute inset-12 border border-white/5 rounded-full" />
-      <div className="absolute inset-16 border border-white/5 rounded-full" />
-      <div className="absolute inset-20 border border-white/5 rounded-full" />
-      
-      {/* Center Label */}
-      <div className="w-24 h-24 md:w-32 md:h-32 bg-[#c29e5a] rounded-full flex items-center justify-center border-4 border-[#a38345] shadow-inner">
-        <div className="w-4 h-4 md:w-6 md:h-6 bg-[#0d0c0b] rounded-full" />
-        <span className="absolute text-[8px] md:text-[10px] font-bold text-[#0d0c0b] mt-10 md:mt-14 tracking-widest uppercase">E-GE VINYL</span>
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Particle class definition
+    class Particle {
+      constructor() {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.vx = (Math.random() - 0.5) * 0.4;
+        this.vy = (Math.random() - 0.5) * 0.4;
+        this.radius = Math.random() * 1.5 + 1;
+        this.opacity = Math.random() * 0.5 + 0.3;
+      }
+
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Bounce off bounds
+        if (this.x < 0 || this.x > canvas.width) this.vx = -this.vx;
+        if (this.y < 0 || this.y > canvas.height) this.vy = -this.vy;
+      }
+
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(194, 158, 90, ${this.opacity})`; // Golden accent
+        ctx.fill();
+      }
+    }
+
+    // Initialize particles
+    const particleCount = Math.min(65, Math.floor((canvas.width * canvas.height) / 18000));
+    for (let i = 0; i < particleCount; i++) {
+      particles.push(new Particle());
+    }
+
+    // Animation Loop
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Deep celestial radial background
+      const gradient = ctx.createRadialGradient(
+        canvas.width / 2, canvas.height / 2, 10,
+        canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height)
+      );
+      gradient.addColorStop(0, '#0e0d0c');
+      gradient.addColorStop(1, '#050404');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Update and draw particles
+      particles.forEach(p => {
+        p.update();
+        p.draw();
+      });
+
+      // Draw constellation connections
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist < 120) {
+            const opacity = (1 - dist / 120) * 0.18;
+            ctx.strokeStyle = `rgba(194, 158, 90, ${opacity})`;
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      animationFrameId = requestAnimationFrame(animate);
+    };
+
+    animate();
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('resize', resizeCanvas);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block z-0" />;
+};
+
+// Simplified and Elegant Floating Platter Header
+const ClassyPlatter = () => (
+  <div className="relative w-28 h-28 mx-auto mb-3 flex items-center justify-center overflow-visible z-20 shrink-0 select-none">
+    {/* Soft Gold Aura */}
+    <div className="absolute -inset-4 rounded-full bg-radial from-[#c29e5a]/8 via-transparent to-transparent blur-xl pointer-events-none" />
+
+    {/* Elegant Micro Outer Ring */}
+    <div className="absolute inset-[-4px] rounded-full border border-[#c29e5a]/10 pointer-events-none" />
+
+    {/* Center Core Platter */}
+    <div className="relative w-full h-full rounded-full bg-gradient-to-tr from-[#0b0a09] via-[#141210] to-[#040404] p-0.5 shadow-[0_12px_24px_rgba(0,0,0,0.85)] border border-white/[0.03] flex items-center justify-center">
+      <div className="absolute inset-1 rounded-full overflow-hidden shadow-inner z-10 aspect-square">
+        <VinylDisc 
+          thumbnail="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=250&h=250&fit=crop" 
+          speed={33} 
+          rotationAngle={0}
+          isDragging={false}
+        />
       </div>
-    </motion.div>
+    </div>
     
-    {/* Tonearm (Visual only, static) */}
-    <div className="absolute -right-4 -top-4 w-12 h-32 md:w-16 md:h-40 pointer-events-none opacity-80">
-      <div className="absolute right-6 top-0 w-2 h-2 bg-[#444] rounded-full border border-[#666]" />
-      <div className="absolute right-6 top-1 w-1 h-24 md:h-32 bg-gradient-to-b from-[#666] to-[#444] origin-top rotate-[15deg]" />
-      <div className="absolute right-12 top-24 md:top-32 w-4 h-6 bg-[#222] rounded-sm rotate-[15deg]" />
+    {/* Elegant Gold Tonearm */}
+    <div className="absolute top-[-10%] right-[-14%] w-[45%] h-[115%] z-[1000] pointer-events-none overflow-visible filter drop-shadow-[0_6px_12px_rgba(0,0,0,0.6)]">
+      <Tonearm />
     </div>
   </div>
 );
 
 const LandingPage = () => {
-  const { signIn, signUp } = useAuth();
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  const { signIn, signUp, signInAsGuest, updateProfile } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
+  
+  // Registration Form Steps: 1 = Credentials, 2 = Profile details
+  const [registerStep, setRegisterStep] = useState(1);
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [selectedAvatar, setSelectedAvatar] = useState(PRESET_AVATARS[0].url);
   const [loading, setLoading] = useState(false);
+
+  // When switching tabs, reset the step
+  useEffect(() => {
+    setRegisterStep(1);
+  }, [isLogin]);
+
+  const handleNextStep = (e) => {
+    e.preventDefault();
+    if (!email || !password) {
+      toast.error("Veuillez remplir l'email et le mot de passe.");
+      return;
+    }
+    if (password.length < 6) {
+      toast.error("Le mot de passe doit faire au moins 6 caractères.");
+      return;
+    }
+    setRegisterStep(2);
+  };
+
+  const handlePrevStep = () => {
+    setRegisterStep(1);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -55,217 +186,299 @@ const LandingPage = () => {
       if (isLogin) {
         const { error } = await signIn(email, password);
         if (error) throw error;
-        toast.success("Bon retour ! Connexion réussie.");
-        setShowAuthModal(false);
+        toast.success("Heureux de vous revoir sur E-GE Vinyl !");
       } else {
-        const { error } = await signUp(email, password);
+        const { data, error } = await signUp(email, password);
         if (error) throw error;
-        toast.success("Bienvenue ! Vérifiez votre boîte mail pour confirmer l'inscription.");
-        setIsLogin(true);
+        
+        if (data?.user) {
+          try {
+            await updateProfile({
+              full_name: fullName || username || email.split('@')[0],
+              username: username || email.split('@')[0],
+              avatar_url: selectedAvatar
+            });
+          } catch (_) {}
+        }
+
+        toast.success("Votre compte a été configuré avec succès ! Bienvenue.");
       }
     } catch (error) {
-      toast.error(error.message || "Une erreur est survenue");
+      toast.error(error.message || "Impossible de se connecter. Vérifiez vos identifiants.");
     } finally {
       setLoading(false);
     }
   };
 
+  const handleGuestLogin = () => {
+    signInAsGuest();
+    toast.success("Bienvenue ! Entrée en mode Invité.");
+  };
+
   return (
-    <div className="min-h-screen bg-[#0d0c0b] text-[#e6dfd5] font-sans selection:bg-[#c29e5a] selection:text-[#0d0c0b]">
-      {/* Background patterns */}
-      <div className="fixed inset-0 pointer-events-none opacity-[0.03]" 
-           style={{ backgroundImage: `radial-gradient(#c29e5a 0.5px, transparent 0.5px)`, backgroundSize: '24px 24px' }} />
+    <div className="h-dvh w-full text-[#f4efe6] font-sans flex items-center justify-center p-4 relative overflow-hidden selection:bg-[#c29e5a] selection:text-[#0d0c0b]">
+      {/* Dynamic Portfolio Constellation Background */}
+      <ConstellationBackground />
 
-      {/* Hero Section */}
-      <main className="relative z-10 max-w-7xl mx-auto px-6 pt-20 pb-32 flex flex-col items-center">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="text-center mb-16"
-        >
-          <span className="inline-block px-4 py-1.5 mb-6 text-xs font-bold tracking-[0.2em] uppercase bg-[#c29e5a]/10 border border-[#c29e5a]/20 text-[#c29e5a] rounded-full">
-            Nouvelle Expérience Audio
-          </span>
-          <h1 className="text-5xl md:text-7xl font-black mb-8 tracking-tight">
-            E-GE Vinyl <span className="text-[#c29e5a]">—</span> <br className="hidden md:block" />
-            L'Âme du Vinyle, <br className="hidden md:block" />
-            La Force du Numérique.
-          </h1>
-          <p className="text-lg md:text-xl text-[#e6dfd5]/60 max-w-2xl mx-auto leading-relaxed">
-            Un lecteur audio hybride qui fusionne la nostalgie visuelle du disque microsillon 
-            avec la puissance de votre bibliothèque numérique.
-          </p>
-        </motion.div>
+      {/* Classy & Ultra-Clean Glassmorphic Card (Zero Scrollable Guarantee) */}
+      <div className="relative w-full max-w-[370px] p-5 sm:p-7 rounded-[26px] bg-[#0c0a09]/80 border border-white/[0.04] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.85)] backdrop-blur-2xl z-10 flex flex-col my-auto overflow-hidden">
+        
+        {/* Decorative Top Accent */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-[1.5px] bg-gradient-to-r from-transparent via-[#c29e5a]/40 to-transparent" />
 
-        {/* Visual & CTAs */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center w-full max-w-6xl">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 1, delay: 0.2 }}
-            className="order-2 lg:order-1"
-          >
-            <VinylRecord />
-          </motion.div>
+        {/* Floating Platter */}
+        <ClassyPlatter />
 
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.8, delay: 0.4 }}
-            className="flex flex-col gap-10 order-1 lg:order-2"
-          >
-            {/* Main CTA */}
-            <div className="space-y-6">
-              <h2 className="text-2xl font-bold border-l-4 border-[#c29e5a] pl-4">Commencez l'aventure</h2>
-              <button
-                onClick={() => setShowAuthModal(true)}
-                className="group relative w-full md:w-fit px-8 py-4 bg-[#c29e5a] text-[#0d0c0b] font-bold rounded-xl overflow-hidden shadow-[0_0_20px_rgba(194,158,90,0.3)] hover:shadow-[0_0_30px_rgba(194,158,90,0.5)] transition-all flex items-center justify-center gap-3"
-              >
-                <LogIn className="w-5 h-5" />
-                <span>Se connecter / S'inscrire</span>
-                <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
-
-            {/* Download Section */}
-            <div className="space-y-6">
-              <h2 className="text-2xl font-bold border-l-4 border-[#c29e5a] pl-4">Télécharger l'application</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="relative group p-4 rounded-2xl bg-[#120f0a] border border-[#3b2d1c] opacity-60">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Monitor className="w-6 h-6 text-[#c29e5a]" />
-                    <span className="font-bold">Windows (PC)</span>
-                  </div>
-                  <span className="inline-block px-2 py-0.5 text-[10px] font-bold uppercase bg-[#3b2d1c] text-[#e6dfd5]/40 rounded-md">
-                    Bientôt disponible
-                  </span>
-                </div>
-                <div className="relative group p-4 rounded-2xl bg-[#120f0a] border border-[#3b2d1c] opacity-60">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Smartphone className="w-6 h-6 text-[#c29e5a]" />
-                    <span className="font-bold">Android (APK)</span>
-                  </div>
-                  <span className="inline-block px-2 py-0.5 text-[10px] font-bold uppercase bg-[#3b2d1c] text-[#e6dfd5]/40 rounded-md">
-                    Bientôt disponible
-                  </span>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="relative z-10 py-12 border-t border-[#3b2d1c] bg-[#120f0a]/50">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-[#c29e5a] rounded-full flex items-center justify-center">
-              <div className="w-1.5 h-1.5 bg-[#0d0c0b] rounded-full" />
-            </div>
-            <span className="font-black text-xl tracking-tighter">E-GE VINYL</span>
-          </div>
-          <p className="text-sm text-[#e6dfd5]/40">
-            © {new Date().getFullYear()} E-GE Vinyl. Tous droits réservés.
+        {/* Brand Title */}
+        <div className="text-center mb-4 shrink-0">
+          <h2 className="text-xl font-black tracking-tight text-white uppercase bg-gradient-to-r from-white via-[#fcfbf9] to-[#c29e5a] bg-clip-text text-transparent">
+            E-GE VINYL
+          </h2>
+          <p className="text-[#f4efe6]/50 text-[10px] mt-1 font-medium leading-relaxed max-w-[280px] mx-auto">
+            {isLogin 
+              ? "Platine audiophile numérique haut de gamme." 
+              : registerStep === 1 
+                ? "Étape 1 : Créez vos identifiants sécurisés."
+                : "Étape 2 : Personnalisez votre profil d'écoute."}
           </p>
         </div>
-      </footer>
 
-      {/* Auth Modal */}
-      <AnimatePresence>
-        {showAuthModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowAuthModal(false)}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-md p-8 rounded-3xl bg-[#120f0a] border border-[#3b2d1c] shadow-2xl"
+        {/* Minimal Tab Switcher (Visible only if not in step 2 of registration) */}
+        {(!isLogin && registerStep === 2) ? (
+          <button
+            type="button"
+            onClick={handlePrevStep}
+            className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-[#c29e5a] font-bold uppercase tracking-wider mb-4 shrink-0 transition-colors cursor-pointer mr-auto"
+          >
+            <ArrowLeft size={12} />
+            <span>Retour à l'étape 1</span>
+          </button>
+        ) : (
+          <div className="grid grid-cols-2 p-1 bg-black/40 border border-white/[0.03] rounded-xl mb-4 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsLogin(true)}
+              className={`py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all duration-300 cursor-pointer ${
+                isLogin 
+                  ? 'bg-[#c29e5a] text-[#0d0c0b] shadow-md font-black' 
+                  : 'text-gray-400 hover:text-[#f4efe6]'
+              }`}
             >
-              <button 
-                onClick={() => setShowAuthModal(false)}
-                className="absolute right-6 top-6 p-2 rounded-full hover:bg-[#3b2d1c] transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              Connexion
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsLogin(false)}
+              className={`py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all duration-300 cursor-pointer ${
+                !isLogin 
+                  ? 'bg-[#c29e5a] text-[#0d0c0b] shadow-md font-black' 
+                  : 'text-gray-400 hover:text-[#f4efe6]'
+              }`}
+            >
+              S'inscrire
+            </button>
+          </div>
+        )}
 
-              <div className="text-center mb-8">
-                <h3 className="text-2xl font-bold mb-2">
-                  {isLogin ? "Bon retour parmi nous" : "Créer un compte"}
-                </h3>
-                <p className="text-[#e6dfd5]/60 text-sm">
-                  {isLogin 
-                    ? "Connectez-vous pour retrouver votre bibliothèque." 
-                    : "Rejoignez l'expérience E-GE Vinyl dès aujourd'hui."}
-                </p>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="relative">
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#c29e5a]" />
+        {/* Form Fields - Fixed Layout, No Scroll */}
+        <div className="w-full">
+          {isLogin ? (
+            /* --- LOGIN FORM (2 fields, zero-scroll) --- */
+            <form onSubmit={handleSubmit} className="space-y-3.5">
+              <div className="space-y-1">
+                <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Adresse Email</span>
+                <div className="relative group">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-[#c29e5a] transition-colors" />
                   <input
                     type="email"
-                    placeholder="Email"
+                    placeholder="votre@email.com"
                     required
-                    className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-[#0d0c0b] border border-[#3b2d1c] focus:outline-none focus:border-[#c29e5a] transition-colors"
+                    className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-black/40 border border-white/[0.05] text-white placeholder-gray-600 focus:outline-none focus:border-[#c29e5a] transition-all font-medium"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                   />
                 </div>
-                {!isLogin && (
-                   <div className="relative">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#c29e5a]" />
-                    <input
-                      type="text"
-                      placeholder="Nom d'utilisateur"
-                      required
-                      className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-[#0d0c0b] border border-[#3b2d1c] focus:outline-none focus:border-[#c29e5a] transition-colors"
-                    />
-                  </div>
-                )}
-                <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#c29e5a]" />
+              </div>
+
+              <div className="space-y-1">
+                <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Mot de passe</span>
+                <div className="relative group">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-[#c29e5a] transition-colors" />
                   <input
                     type="password"
-                    placeholder="Mot de passe"
+                    placeholder="••••••••••••"
                     required
-                    className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-[#0d0c0b] border border-[#3b2d1c] focus:outline-none focus:border-[#c29e5a] transition-colors"
+                    className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-black/40 border border-white/[0.05] text-white placeholder-gray-600 focus:outline-none focus:border-[#c29e5a] transition-all font-medium"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
                 </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-4 mt-4 bg-[#c29e5a] text-[#0d0c0b] font-bold rounded-xl hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {loading ? (
-                    <div className="w-5 h-5 border-2 border-[#0d0c0b]/30 border-t-[#0d0c0b] rounded-full animate-spin" />
-                  ) : (
-                    <span>{isLogin ? "Se connecter" : "S'inscrire"}</span>
-                  )}
-                </button>
-              </form>
-
-              <div className="mt-8 pt-6 border-t border-[#3b2d1c] text-center">
-                <button
-                  onClick={() => setIsLogin(!isLogin)}
-                  className="text-sm text-[#e6dfd5]/60 hover:text-[#c29e5a] transition-colors"
-                >
-                  {isLogin ? "Pas encore de compte ? Rejoignez-nous" : "Déjà membre ? Connectez-vous"}
-                </button>
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 bg-gradient-to-r from-[#e1bb72] to-[#c29e5a] text-[#0d0c0b] font-black uppercase tracking-wider text-xs rounded-xl hover:opacity-95 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-[#c29e5a]/10 cursor-pointer mt-4"
+              >
+                {loading ? (
+                  <div className="w-4 h-4 border-2 border-[#0d0c0b]/35 border-t-[#0d0c0b] rounded-full animate-spin" />
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <LogIn size={13} className="stroke-[3]" />
+                    <span>Se connecter</span>
+                  </div>
+                )}
+              </button>
+            </form>
+          ) : (
+            /* --- SIGN UP MULTI-STEP WIZARD (No Scroll) --- */
+            <div className="w-full">
+              {registerStep === 1 ? (
+                /* --- SIGN UP STEP 1: Email & Password (2 fields) --- */
+                <form onSubmit={handleNextStep} className="space-y-3.5">
+                  <div className="space-y-1">
+                    <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Adresse Email</span>
+                    <div className="relative group">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-[#c29e5a] transition-colors" />
+                      <input
+                        type="email"
+                        placeholder="votre@email.com"
+                        required
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-black/40 border border-white/[0.05] text-white placeholder-gray-600 focus:outline-none focus:border-[#c29e5a] transition-all font-medium"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Mot de passe</span>
+                    <div className="relative group">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-[#c29e5a] transition-colors" />
+                      <input
+                        type="password"
+                        placeholder="Min. 6 caractères"
+                        required
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-black/40 border border-white/[0.05] text-white placeholder-gray-600 focus:outline-none focus:border-[#c29e5a] transition-all font-medium"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[9px] text-gray-500 font-mono">Étape 1/2</span>
+                    <button
+                      type="submit"
+                      className="px-5 py-2.5 bg-gradient-to-r from-[#e1bb72] to-[#c29e5a] text-[#0d0c0b] font-black uppercase tracking-wider text-[10px] rounded-xl hover:opacity-95 active:scale-[0.98] transition-all flex items-center gap-1.5 shadow-md cursor-pointer font-black"
+                    >
+                      <span>Continuer</span>
+                      <ArrowRight size={12} className="stroke-[3]" />
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* --- SIGN UP STEP 2: Profile Selection & Identity --- */
+                <form onSubmit={handleSubmit} className="space-y-3.5">
+                  {/* Avatar Picker (compact layout) */}
+                  <div className="bg-black/30 p-2 rounded-xl border border-white/[0.02]">
+                    <div className="flex items-center justify-between mb-1.5 px-1">
+                      <span className="text-[8px] font-bold text-[#c29e5a] uppercase tracking-wider flex items-center gap-1">
+                        <Sparkles size={8} />
+                        <span>Sélectionnez votre avatar</span>
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {PRESET_AVATARS.slice(0, 4).map((avatar) => {
+                        const isSelected = selectedAvatar === avatar.url;
+                        return (
+                          <button
+                            key={avatar.id}
+                            type="button"
+                            onClick={() => setSelectedAvatar(avatar.url)}
+                            className={`relative rounded-full overflow-hidden aspect-square border transition-all duration-200 cursor-pointer ${
+                              isSelected 
+                                ? 'border-[#c29e5a] scale-105 shadow-md shadow-[#c29e5a]/15' 
+                                : 'border-white/5 opacity-60 hover:opacity-100 hover:border-[#c29e5a]/20'
+                            }`}
+                          >
+                            <img 
+                              src={avatar.url} 
+                              alt={avatar.name} 
+                              className="w-full h-full object-cover" 
+                              onError={(e) => {
+                                e.target.onerror = null;
+                                e.target.src = avatar.fallback || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + avatar.id;
+                              }}
+                            />
+                            {isSelected && (
+                              <div className="absolute inset-0 bg-[#c29e5a]/10 flex items-center justify-center">
+                                <div className="w-4 h-4 rounded-full bg-[#c29e5a] text-[#0d0c0b] flex items-center justify-center shadow-sm">
+                                  <Check className="w-2.5 h-2.5 stroke-[4]" />
+                                </div>
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Username Field */}
+                  <div className="space-y-1">
+                    <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Votre nom d'utilisateur (@handle)</span>
+                    <div className="relative group">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-500 group-focus-within:text-[#c29e5a] transition-colors">@</span>
+                      <input
+                        type="text"
+                        placeholder="alex_m"
+                        required
+                        className="w-full pl-7 pr-3 py-2 text-xs rounded-lg bg-black/40 border border-white/[0.05] text-white placeholder-gray-600 focus:outline-none focus:border-[#c29e5a] transition-all font-medium"
+                        value={username}
+                        onChange={(e) => {
+                          setUsername(e.target.value);
+                          if (!fullName) setFullName(e.target.value);
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[9px] text-gray-500 font-mono">Étape 2/2</span>
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="px-5 py-2.5 bg-gradient-to-r from-[#e1bb72] to-[#c29e5a] text-[#0d0c0b] font-black uppercase tracking-wider text-[10px] rounded-xl hover:opacity-95 active:scale-[0.98] transition-all flex items-center gap-1.5 shadow-md cursor-pointer font-black"
+                    >
+                      {loading ? (
+                        <div className="w-3.5 h-3.5 border-2 border-[#0d0c0b]/35 border-t-[#0d0c0b] rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <span>S'inscrire</span>
+                          <Check size={12} className="stroke-[3]" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Clean Guest Option */}
+        <div className="mt-5 pt-3.5 border-t border-white/[0.03] flex flex-col items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleGuestLogin}
+            className="w-full py-1.5 px-4 bg-white/5 hover:bg-white/10 border border-white/5 text-gray-300 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-[#c29e5a]" />
+            <span>Accéder en mode Invité</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

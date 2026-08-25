@@ -29,10 +29,10 @@ import {
 } from 'lucide-react';
 
 export default function LibraryPage() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState('likes'); // 'likes', 'playlists', 'artists', 'offline'
   
-  if (!user && activeTab !== 'offline') {
+  if (!user || user.is_guest) {
     return (
       <div className="p-4 md:p-8 max-w-5xl mx-auto w-full fade-in pb-28 min-h-[60vh] flex flex-col items-center justify-center text-center">
         <div className="w-20 h-20 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 mb-6">
@@ -40,10 +40,15 @@ export default function LibraryPage() {
         </div>
         <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Bibliothèque Privée</h1>
         <p className="text-gray-400 max-w-md text-sm mb-8">
-          Connectez-vous pour synchroniser vos favoris, playlists et artistes suivis sur tous vos appareils.
+          Le mode Invité est restreint. Connectez-vous ou créez un compte pour concevoir vos favoris, playlists et suivre des artistes.
         </p>
-        <div className="flex gap-4">
-           <TabButton active={activeTab === 'offline'} onClick={() => setActiveTab('offline')} icon={CloudOff} label="Voir le contenu Hors-ligne" />
+        <div className="flex flex-col sm:flex-row gap-4">
+          <button
+            onClick={() => signOut()}
+            className="px-6 py-3 bg-[#c29e5a] text-[#0d0c0b] font-black rounded-xl text-xs uppercase tracking-wider hover:bg-[#d6b068] active:scale-[0.98] transition-all cursor-pointer shadow-lg shadow-[#c29e5a]/10"
+          >
+            Se connecter / Créer un compte
+          </button>
         </div>
       </div>
     );

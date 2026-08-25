@@ -14,41 +14,46 @@ export default function BottomNav() {
   ];
 
   return (
-    <div className="fixed bottom-0 w-full bg-[#0a0e1a]/95 backdrop-blur-xl border-t border-white/10 safe-bottom pb-2 z-50">
+    <div className="fixed bottom-0 w-full bg-[#0c0a09]/85 backdrop-blur-2xl border-t border-white/[0.04] safe-bottom pb-2 z-50">
       <nav className="flex justify-around items-center h-16 px-2">
         {navItems.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}
             className={({ isActive }) =>
-              `flex flex-col items-center justify-center w-20 h-14 rounded-2xl transition-all duration-200 ${
+              `flex flex-col items-center justify-center w-20 h-14 rounded-2xl transition-all duration-300 relative ${
                 isActive
                   ? 'text-white'
-                  : 'text-gray-400 hover:text-white'
+                  : 'text-gray-500 hover:text-white'
               }`
             }
           >
             {({ isActive }) => (
               <>
                 <div 
-                  className={`relative flex items-center justify-center w-9 h-9 rounded-full mb-0.5 transition-all ${
-                    isActive ? 'border border-white/20 shadow-md' : ''
+                  className={`relative flex items-center justify-center w-9 h-9 rounded-full mb-0.5 transition-all duration-300 ${
+                    isActive ? 'border border-[#c29e5a]/30 shadow-lg' : ''
                   }`}
                   style={{
-                    backgroundColor: isActive ? `${currentTheme.primary}25` : 'transparent',
-                    color: isActive ? currentTheme.primary : undefined,
-                    boxShadow: isActive ? `0 0 12px ${currentTheme.glow}` : 'none'
+                    backgroundColor: isActive ? 'rgba(194, 158, 90, 0.08)' : 'transparent',
+                    color: isActive ? '#c29e5a' : undefined,
+                    boxShadow: isActive ? '0 0 15px rgba(194, 158, 90, 0.15)' : 'none'
                   }}
                 >
-                  <item.icon size={18} strokeWidth={isActive ? 2.5 : 2} />
+                  <item.icon size={17} strokeWidth={isActive ? 2.5 : 1.75} />
                 </div>
                 <span 
-                  className={`text-[9px] uppercase tracking-wider font-semibold transition-colors ${
-                    isActive ? 'text-white font-bold' : 'text-gray-400'
+                  className={`text-[8.5px] uppercase tracking-widest font-semibold transition-colors duration-300 ${
+                    isActive ? 'text-[#c29e5a] font-black' : 'text-gray-500'
                   }`}
                 >
                   {item.label}
                 </span>
+                
+                {/* Micro Dot indicator under active icon */}
+                {isActive && (
+                  <span className="absolute bottom-1 w-1 h-1 rounded-full bg-[#c29e5a] shadow-[0_0_8px_#c29e5a]" />
+                )}
               </>
             )}
           </NavLink>

@@ -13,7 +13,7 @@ import LyricsView from './LyricsView';
 import { 
   Disc, Sliders, ToggleLeft, ToggleRight,
   Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, 
-  Heart, Download, Check, Mic2, Loader2, X
+  Heart, Download, Check, Mic2, Loader2, X, Maximize2
 } from 'lucide-react';
 
 export default function VinylPlayer() {
@@ -215,7 +215,7 @@ export default function VinylPlayer() {
   const trackDownloading = isDownloading.has(currentTrack.videoId);
 
   return (
-    <div className="fixed xl:relative top-16 xl:top-0 bottom-[72px] xl:bottom-0 left-0 right-0 w-full h-auto xl:h-full flex flex-col items-center xl:justify-center p-2 sm:p-4 pb-0 xl:pb-4 overflow-hidden xl:overflow-y-auto z-30 bg-[var(--color-canvas)] xl:bg-transparent">
+    <div className="fixed xl:relative top-16 xl:top-0 bottom-[72px] xl:bottom-0 left-0 right-0 w-full h-[calc(100dvh-136px)] xl:h-full flex flex-col items-center xl:justify-center p-2 sm:p-4 overflow-hidden z-30 bg-[var(--color-canvas)] xl:bg-transparent">
       {/* Invisible Canvas for Aura extraction */}
       <canvas ref={canvasRef} width="1" height="1" className="hidden" />
 
@@ -438,10 +438,10 @@ export default function VinylPlayer() {
       </div>
 
       {/* 📱 PORTRAIT MOBILE VIEW (TEL OPTIMIZED - COMPACT INTEGRATION FOR ALL SCREEN HEIGHTS) */}
-      <div className="flex xl:hidden flex-col w-full max-w-md gap-2 items-center px-2 pt-1 pb-2 z-10 select-none justify-between h-full overflow-hidden">
+      <div className="flex xl:hidden flex-col w-full h-full max-w-md gap-4 items-center px-3 justify-center pt-6 pb-2 z-10 select-none overflow-hidden">
         
         {/* 📻 CENTERED VINYL & TONEARM FOR MOBILE (GUARANTEED PERFECT 1:1 CIRCLE) */}
-        <div className="relative w-[260px] h-[260px] aspect-square mx-auto flex items-center justify-center overflow-visible z-20 mt-1 shrink-0">
+        <div className="relative w-[230px] h-[230px] xs:w-[265px] xs:h-[265px] sm:w-[290px] sm:h-[290px] aspect-square mx-auto flex items-center justify-center overflow-visible z-20 mt-2 shrink-0">
           
           {/* Circular Platter / Vinyl */}
           <div 
@@ -499,34 +499,43 @@ export default function VinylPlayer() {
         </div>
 
         {/* Current sung lyric line centered beautifully between platter and controls */}
-        <div className="w-full min-h-[48px] flex items-center justify-center text-center px-4 py-1 z-10">
+        <div 
+          onClick={() => setIsLyricsModalOpen(true)}
+          className="w-full min-h-[44px] flex flex-col items-center justify-center text-center px-3 py-1 z-10 cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-all group"
+          title="Ouvrir les paroles en plein écran"
+        >
           {currentLineText ? (
-            <p 
-              className="text-base sm:text-lg font-black tracking-wide leading-snug drop-shadow-md transition-all duration-300 text-center"
-              style={{
-                color: currentTheme?.primary || '#1ED760',
-                textShadow: `0 0 15px ${currentTheme?.glow || 'rgba(30, 215, 96, 0.4)'}`
-              }}
-            >
-              {currentLineText}
-            </p>
+            <div className="flex flex-col items-center gap-0.5">
+              <p 
+                className="text-sm sm:text-base font-black tracking-wide leading-snug drop-shadow-md transition-all duration-300 text-center group-hover:text-white"
+                style={{
+                  color: currentTheme?.primary || '#1ED760',
+                  textShadow: `0 0 15px ${currentTheme?.glow || 'rgba(30, 215, 96, 0.4)'}`
+                }}
+              >
+                {currentLineText}
+              </p>
+              <span className="text-[9px] text-amber-400 font-bold tracking-wider uppercase opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                Paroles plein écran ↗
+              </span>
+            </div>
           ) : (
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest italic font-mono">
-              {isInstrumental ? "🎵 Musique Instrumentale" : "✨ Paroles en cours..."}
+            <p className="text-[10px] font-extrabold text-amber-400/80 uppercase tracking-widest italic font-mono flex items-center gap-1.5 bg-amber-400/10 px-3 py-1 rounded-full border border-amber-400/20 group-hover:bg-amber-400/20 group-hover:text-amber-300 transition-all">
+              {isInstrumental ? "🎵 Musique Instrumentale" : "✨ Paroles (Ouvrir)"}
             </p>
           )}
         </div>
 
         {/* Playback Controls Card */}
-        <div className="w-full bg-[#120f0a]/90 border border-[#2d1c12] rounded-2xl p-5 shadow-2xl flex flex-col gap-4 relative z-10">
+        <div className="w-full bg-[#120f0a]/90 border border-[#2d1c12] rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col gap-3.5 relative z-10">
           {/* Title, Artist and action buttons */}
           <div className="flex justify-between items-center w-full">
-            <div className="flex-1 min-w-0 pr-4">
-              <h2 className="text-base sm:text-lg font-black text-white truncate leading-tight">
+            <div className="flex-1 min-w-0 pr-3">
+              <h2 className="text-sm sm:text-base font-black text-white truncate leading-tight">
                 {currentTrack?.title}
               </h2>
               <p 
-                className="text-xs sm:text-sm text-gray-400 truncate mt-1 cursor-pointer hover:text-white transition-colors"
+                className="text-xs text-gray-400 truncate mt-0.5 cursor-pointer hover:text-white transition-colors"
                 onClick={() => {
                   if (currentTrack?.artist) {
                     window.location.href = `/artist/${encodeURIComponent(currentTrack.artist)}`;
@@ -537,32 +546,32 @@ export default function VinylPlayer() {
               </p>
             </div>
             
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
                 onClick={() => toggleLike(currentTrack)}
-                className="p-2 rounded-full hover:bg-white/5 transition-all cursor-pointer"
+                className="p-1.5 rounded-full hover:bg-white/5 transition-all cursor-pointer"
                 style={{ color: trackLiked ? (currentTheme?.primary || '#1ED760') : '#9ca3af' }}
               >
-                <Heart size={20} fill={trackLiked ? (currentTheme?.primary || '#1ED760') : 'none'} />
+                <Heart size={18} fill={trackLiked ? (currentTheme?.primary || '#1ED760') : 'none'} />
               </button>
               <button
                 onClick={() => trackDownloaded ? removeTrack(currentTrack.videoId) : downloadTrack(currentTrack)}
-                className="p-2 rounded-full hover:bg-white/5 transition-all text-gray-400 cursor-pointer"
+                className="p-1.5 rounded-full hover:bg-white/5 transition-all text-gray-400 cursor-pointer"
                 title={trackDownloaded ? 'Retirer du mode hors-ligne' : 'Télécharger'}
               >
                 {trackDownloading ? (
-                  <Loader2 size={20} className="animate-spin text-amber-500" />
+                  <Loader2 size={18} className="animate-spin text-amber-500" />
                 ) : trackDownloaded ? (
-                  <Check size={20} className="text-amber-500" />
+                  <Check size={18} className="text-amber-500" />
                 ) : (
-                  <Download size={20} />
+                  <Download size={18} />
                 )}
               </button>
             </div>
           </div>
 
           {/* Dynamic Seek Slider */}
-          <div className="flex flex-col gap-1.5 w-full">
+          <div className="flex flex-col gap-1 w-full">
             <input 
               type="range"
               min="0"
@@ -581,91 +590,54 @@ export default function VinylPlayer() {
           </div>
 
           {/* Action Row Buttons */}
-          <div className="flex justify-between items-center px-2">
+          <div className="flex justify-between items-center px-1">
             <button 
               onClick={toggleShuffle}
-              className="p-2 rounded-full transition-colors hover:text-white cursor-pointer"
+              className="p-1.5 rounded-full transition-colors hover:text-white cursor-pointer"
               style={shuffle ? { color: currentTheme?.primary || '#1ED760', backgroundColor: `${currentTheme?.primary || '#1ED760'}20` } : { color: '#9ca3af' }}
             >
-              <Shuffle size={18} />
+              <Shuffle size={16} />
             </button>
 
             <button 
               onClick={playPrevious}
-              className="p-2 rounded-full text-gray-400 hover:text-white transition-all active:scale-90 cursor-pointer"
+              className="p-1.5 rounded-full text-gray-400 hover:text-white transition-all active:scale-90 cursor-pointer"
             >
-              <SkipBack size={22} />
+              <SkipBack size={20} />
             </button>
 
             <button 
               onClick={togglePlayPause}
               disabled={isLoading && !isPlaying}
-              className="w-14 h-14 flex items-center justify-center rounded-full text-black hover:scale-105 active:scale-95 transition-all shadow-lg shrink-0 cursor-pointer"
+              className="w-12 h-12 flex items-center justify-center rounded-full text-black hover:scale-105 active:scale-95 transition-all shadow-lg shrink-0 cursor-pointer"
               style={{
                 backgroundColor: currentTheme?.primary || '#1ED760',
-                boxShadow: `0 0 20px ${currentTheme?.glow || 'rgba(30, 215, 96, 0.4)'}`
+                boxShadow: `0 0 16px ${currentTheme?.glow || 'rgba(30, 215, 96, 0.4)'}`
               }}
             >
               {isLoading && !isPlaying ? (
-                <Loader2 size={24} className="animate-spin" />
+                <Loader2 size={22} className="animate-spin" />
               ) : isPlaying ? (
-                <Pause size={24} fill="black" />
+                <Pause size={22} fill="black" />
               ) : (
-                <Play size={24} fill="black" className="ml-1" />
+                <Play size={22} fill="black" className="ml-0.5" />
               )}
             </button>
 
             <button 
               onClick={playNext}
-              className="p-2 rounded-full text-gray-400 hover:text-white transition-all active:scale-90 cursor-pointer"
+              className="p-1.5 rounded-full text-gray-400 hover:text-white transition-all active:scale-90 cursor-pointer"
             >
-              <SkipForward size={22} />
+              <SkipForward size={20} />
             </button>
 
             <button 
               onClick={toggleRepeat}
-              className="p-2 rounded-full transition-colors hover:text-white cursor-pointer"
+              className="p-1.5 rounded-full transition-colors hover:text-white cursor-pointer"
               style={repeat !== 'off' ? { color: currentTheme?.primary || '#1ED760', backgroundColor: `${currentTheme?.primary || '#1ED760'}20` } : { color: '#9ca3af' }}
             >
-              {repeat === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}
+              {repeat === 'one' ? <Repeat1 size={16} /> : <Repeat size={16} />}
             </button>
-          </div>
-        </div>
-
-        {/* Small bottom lyrics preview box showing 2-3 translucent lines of lyrics */}
-        <div 
-          onClick={() => setIsLyricsModalOpen(true)}
-          className="w-full bg-[#120f0a]/50 border border-[#2d1c12]/60 rounded-xl p-4 cursor-pointer hover:bg-white/5 transition-all shadow-lg flex flex-col gap-2 group relative overflow-hidden"
-        >
-          <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-widest text-gray-400 font-mono border-b border-[#2d1c12]/40 pb-2">
-            <span className="flex items-center gap-1">
-              <Mic2 size={12} style={{ color: currentTheme?.primary || '#1ED760' }} />
-              <span>Paroles</span>
-            </span>
-            <span className="text-[9px] text-gray-500 group-hover:text-white transition-colors">Plein écran ↗</span>
-          </div>
-          
-          <div className="flex flex-col gap-1.5 py-1 text-center justify-center min-h-[50px]">
-            {lyricsLoading ? (
-              <p className="text-xs text-gray-500 animate-pulse font-mono">Chargement des paroles...</p>
-            ) : isInstrumental ? (
-              <p className="text-xs text-gray-400 italic">🎵 Ce titre est une musique instrumentale.</p>
-            ) : lyricsData.length === 0 ? (
-              <p className="text-xs text-gray-500 italic">Aucune parole disponible.</p>
-            ) : (
-              previewLines.slice(0, 2).map((line, i) => (
-                <p 
-                  key={i} 
-                  className={`text-xs font-bold leading-normal truncate ${
-                    i === 0 
-                      ? 'text-white scale-100 opacity-90' 
-                      : 'text-gray-400 scale-95 opacity-50'
-                  }`}
-                >
-                  {line}
-                </p>
-              ))
-            )}
           </div>
         </div>
       </div>

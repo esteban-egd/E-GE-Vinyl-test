@@ -134,11 +134,13 @@ export function isClipTrack(title) {
 export function scoreAudioTrack(track, cleanTitle, cleanArtist) {
   if (!track || !track.title) return -9999;
   
-  const title = track.title.toLowerCase();
-  const artist = (track.artist || '').toLowerCase();
+  const norm = (str) => (str || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+  const title = norm(track.title);
+  const artist = norm(track.artist);
   
-  const qTitle = (cleanTitle || '').toLowerCase();
-  const qArtist = (cleanArtist || '').toLowerCase();
+  const qTitle = norm(cleanTitle);
+  const qArtist = norm(cleanArtist);
   
   let score = 100;
   
@@ -147,50 +149,48 @@ export function scoreAudioTrack(track, cleanTitle, cleanArtist) {
     score -= 10000;
   }
   
-  // 2. Pénalité forte si Clip / Vidéo officielle de musique (contient souvent des bruits de film, intros longues, etc.)
+  // 2. Pénalité forte si Clip / Vidéo officielle de musique
   if (isClipTrack(track.title)) {
-    score -= 5000;
+    score -= 3000;
   }
   
   // 3. Bonus majeur si le uploader est une chaîne "- Topic" (fichiers audio officiels de haute qualité automatique)
   if (artist.endsWith(' - topic') || artist.endsWith('-topic') || artist.includes('topic')) {
-    score += 1500;
+    score += 2500;
   }
   
   // 4. Bonus si titre contient "audio" ou "official audio" ou "lyric"
-  if (/\b(audio|official audio|lyrics|lyric|paroles|art track)\b/i.test(title)) {
-    score += 800;
+  if (/\b(audio|official audio|lyrics|lyric|paroles|art track)\b/i.test(track.title)) {
+    score += 1200;
   }
   
   // 5. Correspondance du titre
-  if (title.includes(qTitle)) {
-    score += 300;
-    // Si le titre nettoyé est exactement égal au titre recherché
-    const titleCleaned = title.replace(/\s*[\(\[\{].*?[\)\]\}]/g, '').trim();
+  if (qTitle && title.includes(qTitle)) {
+    score += 1000;
+    const titleCleaned = norm(track.title.replace(/\s*[\(\[\{].*?[\)\]\}]/g, ''));
     if (titleCleaned === qTitle) {
-      score += 400;
+      score += 1500;
     }
-  } else {
-    // Si le titre ne contient pas la recherche, on vérifie la correspondance par mots
+  } else if (qTitle) {
     const words = qTitle.split(/\s+/).filter(w => w.length > 2);
     let wordMatches = 0;
     for (const w of words) {
       if (title.includes(w)) wordMatches++;
     }
     if (wordMatches > 0) {
-      score += wordMatches * 80;
+      score += wordMatches * 200;
     } else {
-      score -= 3000; // Pas le bon morceau
+      score -= 5000; // Pas le bon morceau
     }
   }
   
   // 6. Correspondance de l'artiste
-  if (qArtist && isArtistMatch(track.artist, qArtist)) {
-    score += 400;
+  if (qArtist && isArtistMatch(track.artist, cleanArtist)) {
+    score += 1500;
   } else if (qArtist && (artist.includes(qArtist) || qArtist.includes(artist))) {
-    score += 200;
-  } else {
-    score -= 1500; // Mauvais artiste
+    score += 800;
+  } else if (qArtist) {
+    score -= 3000; // Mauvais artiste
   }
   
   return score;
@@ -253,31 +253,36 @@ export function getHdArtwork(url, fallbackVideoId = null) {
     return '';
   }
 
-  if (url.includes('mzstatic.com')) {
-    return url.replace(/\/[0-9]+x[0-9]+[a-zA-Z]*\./, '/1000x1000bb.');
+  let cleanUrl = typeof url === 'string' && url.startsWith('http://') 
+    ? url.replace('http://', 'https://') 
+    : url;
+
+  if (cleanUrl.includes('mzstatic.com')) {
+    return cleanUrl.replace(/\/[0-9]+x[0-9]+[a-zA-Z]*\./, '/1000x1000bb.');
   }
 
-  if (url.includes('i.ytimg.com') || url.includes('ytimg.com')) {
-    return url
+  if (cleanUrl.includes('i.ytimg.com') || cleanUrl.includes('ytimg.com')) {
+    return cleanUrl
       .replace('/maxresdefault.jpg', '/hqdefault.jpg')
       .replace('/sddefault.jpg', '/hqdefault.jpg')
       .replace('/mqdefault.jpg', '/hqdefault.jpg')
       .replace('/default.jpg', '/hqdefault.jpg');
   }
 
-  return url;
+  return cleanUrl;
 }
 
 // Fallback preview Deezer HQ
 export async function getDeezerPreview(title, artist) {
   try {
-    const proxy = "https://api.allorigins.win/raw?url=";
-    const query = encodeURIComponent(`${artist || ''} ${title || ''}`.trim());
-    const url = `${proxy}${encodeURIComponent(`https://api.deezer.com/search?q=${query}&limit=1`)}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
-    const data = await res.json();
-    if (data.data && data.data.length > 0 && data.data[0].preview) {
-      return data.data[0].preview;
+    const query = `${artist || ''} ${title || ''}`.trim();
+    if (!query) return null;
+    const res = await fetch(`/api/deezer-search?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(3500) });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.data && data.data.length > 0 && data.data[0].preview) {
+        return data.data[0].preview;
+      }
     }
   } catch (err) {
     console.warn('[MusicDataService] Erreur Deezer preview:', err);
@@ -315,11 +320,11 @@ export async function searchUnified(query) {
       { signal: AbortSignal.timeout(2500) }
     ).then(res => res.json()).catch(() => ({ results: [] }));
 
-    const deezerSearchPromise = fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=25`)}`, {
+    const deezerSearchPromise = fetch(`/api/deezer-search?q=${encodeURIComponent(query)}`, {
       signal: AbortSignal.timeout(3000)
     }).then(res => res.json()).catch(() => ({ data: [] }));
 
-    const deezerArtistPromise = fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search/artist?q=${encodeURIComponent(query)}&limit=10`)}`, {
+    const deezerArtistPromise = fetch(`/api/deezer-artist?q=${encodeURIComponent(query)}`, {
       signal: AbortSignal.timeout(3000)
     }).then(res => res.json()).catch(() => ({ data: [] }));
 
@@ -345,7 +350,7 @@ export async function searchUnified(query) {
 
     if (matchedArtist && matchedArtist.id) {
       try {
-        const topRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/artist/${matchedArtist.id}/top?limit=50`)}`, { signal: AbortSignal.timeout(2500) });
+        const topRes = await fetch(`/api/deezer-artist-top?id=${matchedArtist.id}`, { signal: AbortSignal.timeout(2500) });
         if (topRes.ok) {
           const topData = await topRes.json();
           if (topData && Array.isArray(topData.data)) {
@@ -822,7 +827,7 @@ export async function fetchTheAudioDbArtistVisuals(artistName) {
 
   // 1. Essai Deezer via proxy backend (très haute qualité pour les artistes majeurs)
   try {
-    const dzRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search/artist?q=${encodeURIComponent(mainName)}&limit=10`)}`, {
+    const dzRes = await fetch(`/api/deezer-artist?q=${encodeURIComponent(mainName)}`, {
       signal: AbortSignal.timeout(3000)
     });
     if (dzRes.ok) {
@@ -934,7 +939,7 @@ export async function getArtistDetails(artistName) {
     let dzAlbums = [];
 
     try {
-      const dzArtistRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search/artist?q=${encodeURIComponent(cleanName)}&limit=10`)}`, {
+      const dzArtistRes = await fetch(`/api/deezer-artist?q=${encodeURIComponent(cleanName)}`, {
         signal: AbortSignal.timeout(5000)
       });
       if (dzArtistRes.ok) {
@@ -944,8 +949,8 @@ export async function getArtistDetails(artistName) {
 
           if (dzArtist && dzArtist.id) {
             const [topRes, albRes] = await Promise.all([
-              fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/artist/${dzArtist.id}/top?limit=50`)}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] })),
-              fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/artist/${dzArtist.id}/albums?limit=50`)}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] }))
+              fetch(`/api/deezer-artist-top?id=${dzArtist.id}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] })),
+              fetch(`/api/deezer-artist-albums?id=${dzArtist.id}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] }))
             ]);
             dzTopTracks = topRes?.data || [];
             dzAlbums = albRes?.data || [];
@@ -959,7 +964,7 @@ export async function getArtistDetails(artistName) {
     // 2. Deezer Search direct pour trouver tous les morceaux de l'artiste
     let dzSearchTracks = [];
     try {
-      const dzSearchRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search?q=artist:"${encodeURIComponent(cleanName)}"`)}`, {
+      const dzSearchRes = await fetch(`/api/deezer-search?q=artist:"${encodeURIComponent(cleanName)}"`, {
         signal: AbortSignal.timeout(5000)
       });
       if (dzSearchRes.ok) {
@@ -973,7 +978,7 @@ export async function getArtistDetails(artistName) {
     // Si la recherche ciblée artiste n'a rien donné, recherche générale
     if (dzSearchTracks.length === 0) {
       try {
-        const dzGeneralRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search?q=${encodeURIComponent(cleanName)}`)}`, {
+        const dzGeneralRes = await fetch(`/api/deezer-search?q=${encodeURIComponent(cleanName)}`, {
           signal: AbortSignal.timeout(5000)
         });
         if (dzGeneralRes.ok) {
@@ -1131,8 +1136,7 @@ export async function getArtistDetails(artistName) {
       const topAlbumsToFetch = albums.filter(a => a.deezerId).slice(0, 3);
       for (const alb of topAlbumsToFetch) {
         try {
-          const targetUrl = `https://api.deezer.com/album/${alb.deezerId}/tracks?limit=100`;
-          const albTracksRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, {
+          const albTracksRes = await fetch(`/api/deezer-album-tracks?id=${alb.deezerId}`, {
             signal: AbortSignal.timeout(3000)
           });
           if (albTracksRes.ok) {
@@ -1351,8 +1355,7 @@ export async function getAlbumTracks(album, artistName) {
   // 1. Si on a un deezerId
   if (album.deezerId) {
     try {
-      const targetUrl = `https://api.deezer.com/album/${album.deezerId}/tracks?limit=100`;
-      const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`);
+      const res = await fetch(`/api/deezer-album-tracks?id=${album.deezerId}`);
       if (res.ok) {
         const data = await res.json();
         if (data && Array.isArray(data.data)) {

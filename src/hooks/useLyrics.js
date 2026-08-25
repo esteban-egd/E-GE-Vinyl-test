@@ -49,6 +49,22 @@ function parseLrc(lrcText) {
   return parsed.sort((a, b) => a.time - b.time);
 }
 
+function generateFallbackLyrics(title, artist, trackDuration) {
+  const d = trackDuration || 200;
+  const cleanTitle = title || 'Morceau';
+  const cleanArtist = artist || 'Artiste';
+  return [
+    { time: 0, text: `♪ [Intro Musicale • ${cleanArtist}] ♪` },
+    { time: Math.min(12, d * 0.06), text: `${cleanTitle}` },
+    { time: Math.min(25, d * 0.12), text: `Écoute de ${cleanTitle} en haute qualité` },
+    { time: Math.min(42, d * 0.22), text: `♪ [Couplet & Mélodie Principale] ♪` },
+    { time: Math.min(65, d * 0.35), text: `♪ [Refrain & Harmonies] ♪` },
+    { time: Math.min(95, d * 0.50), text: `♪ [Solo & Arrangement Vokal] ♪` },
+    { time: Math.min(130, d * 0.70), text: `♪ [Deuxième Refrain] ♪` },
+    { time: Math.min(160, d * 0.85), text: `♪ [Outro & Final] ♪` }
+  ];
+}
+
 // Générateur de jalons temporels pour les paroles non synchronisées
 function parsePlain(plainText, trackDuration) {
   if (!plainText) return [];
@@ -199,7 +215,8 @@ export function useLyrics(currentTrack, currentTime, duration) {
         return;
       }
 
-      setLyricsData([]);
+      // Fallback si aucune parole trouvée en ligne : générer des jalons musicaux élégants
+      setLyricsData(generateFallbackLyrics(rawTitle, mainArtist, duration));
       setIsRealSynced(false);
       setLoading(false);
     };
@@ -209,7 +226,7 @@ export function useLyrics(currentTrack, currentTime, duration) {
     return () => {
       active = false;
     };
-  }, [currentTrack, duration]);
+  }, [currentTrack]);
 
   // Détection de l'index de la ligne active
   const activeIndex = useMemo(() => {
@@ -235,7 +252,11 @@ export function useLyrics(currentTrack, currentTime, duration) {
 
   const previewLines = useMemo(() => {
     if (lyricsData.length === 0) return [];
-    const start = Math.max(0, activeIndex);
+    if (lyricsData.length <= 3) return lyricsData.map(l => l.text);
+    
+    // Always return 3 lines: current line + 2 next lines (or end-buffered 3 lines)
+    const maxStart = Math.max(0, lyricsData.length - 3);
+    const start = Math.min(Math.max(0, activeIndex), maxStart);
     return lyricsData.slice(start, start + 3).map(l => l.text);
   }, [lyricsData, activeIndex]);
 

@@ -12,7 +12,7 @@ export function LikesProvider({ children }) {
   const [loading, setLoading] = useState(false);
 
   const fetchLikes = useCallback(async () => {
-    if (!user) {
+    if (!user || user.is_guest) {
       setLikedTracks([]);
       return;
     }
@@ -52,8 +52,11 @@ export function LikesProvider({ children }) {
   }, [likedTracks]);
 
   const toggleLike = useCallback(async (track) => {
-    if (!user) {
-      toast.error('Connectez-vous pour ajouter des favoris');
+    if (!user || user.is_guest) {
+      toast.error('Le mode Invité est restreint. Connectez-vous ou créez un compte pour ajouter des favoris !', {
+        icon: '🔒',
+        duration: 4000
+      });
       return;
     }
     if (!track) return;

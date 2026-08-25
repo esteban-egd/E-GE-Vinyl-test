@@ -54,9 +54,9 @@ export default function Header() {
         {user && (
           <button
             onClick={() => setIsProfileOpen(true)}
-            className="flex items-center gap-3 p-1.5 pr-4 rounded-full bg-[#120f0a] border border-[#3b2d1c] hover:border-[#c29e5a] transition-all group"
+            className="flex items-center gap-2.5 p-1.5 pr-3.5 rounded-full bg-[#120f0a] border border-[#3b2d1c] hover:border-[#c29e5a] transition-all group max-w-[200px] sm:max-w-none"
           >
-            <div className="w-8 h-8 rounded-full overflow-hidden bg-[#0d0c0b] border border-[#3b2d1c] group-hover:border-[#c29e5a] transition-colors">
+            <div className="w-8 h-8 shrink-0 rounded-full overflow-hidden bg-[#0d0c0b] border border-[#3b2d1c] group-hover:border-[#c29e5a] transition-colors">
               {profile?.avatar_url ? (
                 <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
               ) : (
@@ -65,11 +65,11 @@ export default function Header() {
                 </div>
               )}
             </div>
-            <div className="hidden sm:flex flex-col items-start leading-none">
-              <span className="text-xs font-black text-white uppercase tracking-tighter">
-                {profile?.full_name || user.email.split('@')[0]}
+            <div className="flex flex-col items-start leading-none min-w-0">
+              <span className="text-xs font-black text-white uppercase tracking-tighter truncate max-w-[110px] sm:max-w-xs">
+                {profile?.full_name || user.email?.split('@')[0] || 'Compte'}
               </span>
-              <span className="text-[9px] font-bold text-[#8a7250] uppercase tracking-widest mt-0.5">
+              <span className="text-[9px] font-bold text-[#8a7250] uppercase tracking-widest mt-0.5 truncate max-w-[110px] sm:max-w-xs">
                 {profile?.username ? `@${profile.username}` : 'Artiste'}
               </span>
             </div>

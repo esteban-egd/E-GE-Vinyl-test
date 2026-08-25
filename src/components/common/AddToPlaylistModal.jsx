@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { usePlaylists } from '../../hooks/usePlaylists';
-import { X, Plus, ListMusic, Check, Sparkles } from 'lucide-react';
+import { X, Plus, ListMusic, Check, Sparkles, Lock } from 'lucide-react';
 import TrackImage from './TrackImage';
+import { useAuth } from '../../context/AuthContext';
 
 export default function AddToPlaylistModal({ track, isOpen, onClose }) {
+  const { user, signOut } = useAuth();
   const { playlists, createPlaylist, addTrackToPlaylist } = usePlaylists();
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -11,6 +13,42 @@ export default function AddToPlaylistModal({ track, isOpen, onClose }) {
   const [toastMessage, setToastMessage] = useState(null);
 
   if (!isOpen || !track) return null;
+
+  if (user?.is_guest) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md fade-in">
+        <div 
+          className="w-full max-w-sm bg-[#161616] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center text-center text-white"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="w-14 h-14 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 mb-4">
+            <Lock size={28} />
+          </div>
+          <h3 className="text-lg font-bold mb-2">Playlists Privées</h3>
+          <p className="text-xs text-gray-400 mb-6 leading-relaxed">
+            Le mode Invité est restreint. Créez un compte ou connectez-vous pour concevoir vos propres playlists personnalisées et y ajouter des titres.
+          </p>
+          <div className="flex flex-col gap-2 w-full">
+            <button
+              onClick={() => {
+                onClose();
+                signOut();
+              }}
+              className="w-full py-2.5 bg-amber-500 text-black font-black uppercase tracking-wider text-xs rounded-xl hover:bg-amber-400 active:scale-[0.98] transition-all cursor-pointer shadow-md shadow-amber-500/10"
+            >
+              Se connecter / S'inscrire
+            </button>
+            <button 
+              onClick={onClose}
+              className="w-full py-2 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const showToast = (msg) => {
     setToastMessage(msg);

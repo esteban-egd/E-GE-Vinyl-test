@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useLiveQuery } from './useLiveQuery';
 import db from '../lib/db';
-import { getDeezerPreview } from '../services/musicDataService';
+import { getLyraAudioStream } from '../services/lyraAudio';
 
 export function useOfflineCache() {
   const [downloading, setDownloading] = useState(new Set());
@@ -41,17 +41,18 @@ export function useOfflineCache() {
   }, [cachedTracks]);
 
   const downloadTrack = useCallback(async (track) => {
-    const id = track.id || track.id || `${track.title}_${track.artist}`;
+    const trackId = track.videoId || track.id;
+    const id = trackId || `${track.title}_${track.artist}`;
     if (isCached(id)) return;
 
     setDownloading((prev) => new Set(prev).add(id));
     setError(null);
 
-    let streamUrl = track.previewUrl;
+    let streamUrl = track.audioUrl || track.streamUrl;
     let mimeType = 'audio/mp3';
 
-    if (!streamUrl) {
-      streamUrl = await getDeezerPreview(track.title, track.artist);
+    if (!streamUrl && trackId) {
+      streamUrl = await getLyraAudioStream(trackId, track.title, track.artist);
     }
 
     if (!streamUrl) {
