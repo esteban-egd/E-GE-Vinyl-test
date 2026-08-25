@@ -3,30 +3,28 @@ import { useAudio } from '../../context/AudioContext';
 
 /**
  * YouTubeIframeEngine
- * Moteur YouTube Iframe invisible pour la lecture Web instantanée sans blocage réseau.
+ * Moteur YouTube Iframe invisible pour la lecture Web instantanée.
  */
 export default function YouTubeIframe() {
   const { setIframePlayer, onIframeStateChange, onIframeError } = useAudio();
   const containerRef = useRef(null);
   const playerRef = useRef(null);
-  const isInitializedRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     function initPlayer() {
-      if (playerRef.current || isInitializedRef.current) return;
+      if (playerRef.current) return;
       if (!window.YT || !window.YT.Player) return;
       if (!containerRef.current) return;
 
-      isInitializedRef.current = true;
       try {
         new window.YT.Player(containerRef.current, {
           height: '100%',
           width: '100%',
           videoId: '',
           playerVars: {
-            autoplay: 0,
+            autoplay: 1,
             controls: 0,
             disablekb: 1,
             fs: 0,
@@ -89,7 +87,6 @@ export default function YouTubeIframe() {
           playerRef.current.destroy();
           playerRef.current = null;
         }
-        isInitializedRef.current = false;
         if (setIframePlayer) {
           setIframePlayer(null);
         }
@@ -121,4 +118,3 @@ export default function YouTubeIframe() {
 }
 
 export const YouTubeIframeEngine = YouTubeIframe;
-
