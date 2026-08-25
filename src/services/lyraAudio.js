@@ -210,16 +210,30 @@ export async function searchYouTubeMusic(query) {
 }
 
 /**
- * Résolution multi-sources haute disponibilité pour le streaming audio direct
- * 1. Piped API instances (flux m4a / webm déjà déchiffrés)
- * 2. Invidious instances
- * 3. Cobalt API
- * 4. Deezer HQ Preview fallback
+ * Résolution multi-sources haute disponibilité pour le streaming audio direct YouTube complet
+ * 1. Endpoint Serverless Vercel /api/stream?id=... (Priorité absolue, contourne CORS sans limite)
+ * 2. Cobalt API Direct
+ * 3. Piped API instances (flux m4a / webm complets)
  */
 export async function getLyraAudioStream(videoId, title = "", artist = "") {
   if (!videoId) return null;
 
-  // 1. Cobalt API (Plus stable pour l'extraction directe)
+  // 1. Endpoint Serverless Vercel dédié (/api/stream)
+  try {
+    const streamRes = await fetch(`/api/stream?id=${encodeURIComponent(videoId)}`, {
+      signal: AbortSignal.timeout(6000)
+    });
+    if (streamRes.ok) {
+      const data = await streamRes.json();
+      if (data?.url) {
+        return data.url.replace('http://', 'https://');
+      }
+    }
+  } catch (e) {
+    console.warn('[LyraAudio] Échec endpoint /api/stream local, passage aux fallbacks distants:', e.message);
+  }
+
+  // 2. Cobalt API (Extraction directe alternative)
   try {
     const cobaltRes = await fetch("https://api.cobalt.tools/", {
       method: "POST",
@@ -234,19 +248,20 @@ export async function getLyraAudioStream(videoId, title = "", artist = "") {
     if (cobaltRes.ok) {
       const data = await cobaltRes.json();
       if (data?.url) {
-        // Force HTTPS for production environments
         return data.url.replace('http://', 'https://');
       }
     }
   } catch (e) {
-    console.warn("Cobalt resolution failed");
+    console.warn("[LyraAudio] Cobalt resolution failed");
   }
 
-  // 2. Instances Piped API (Sélection restreinte pour la rapidité)
+  // 3. Instances Piped API (Flux complets M4A/WebM)
   const pipedInstances = [
     "https://pipedapi.kavin.rocks",
     "https://api.piped.privacydev.net",
-    "https://pipedapi.mha.fi"
+    "https://pipedapi.mha.fi",
+    "https://pipedapi.adminforge.de",
+    "https://piped-api.lunar.icu"
   ];
 
   for (const instance of pipedInstances) {
@@ -256,22 +271,10 @@ export async function getLyraAudioStream(videoId, title = "", artist = "") {
       });
       if (res.ok) {
         const data = await res.json();
-        const bestStream = (data.audioStreams || []).find(s => s.format === "M4A") || data.audioStreams?.[0];
+        const bestStream = (data.audioStreams || []).find(s => s.format === "M4A" || s.mimeType?.includes('audio')) || data.audioStreams?.[0];
         if (bestStream?.url) {
-          // Force HTTPS
           return bestStream.url.replace('http://', 'https://');
         }
-      }
-    } catch (e) {}
-  }
-
-  // 3. Fallback Deezer (30s preview) - Toujours fonctionnel et HTTPS
-  if (title) {
-    try {
-      const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search?q=${encodeURIComponent(`${artist} ${title}`)}&limit=1`)}`);
-      const data = await res.json();
-      if (data?.data?.[0]?.preview) {
-        return data.data[0].preview.replace('http://', 'https://');
       }
     } catch (e) {}
   }

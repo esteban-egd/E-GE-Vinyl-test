@@ -373,22 +373,21 @@ export function useAudioPlayer() {
   const onIframeError = useCallback(async (code) => {
     console.warn('[AudioEngine] Erreur YouTube code:', code);
     if (currentTrack) {
-      // Tenter une alternative Lyra Audio Stream ou Deezer preview
+      // Tenter une alternative Lyra Audio Stream complète
       try {
-        const streamUrl = await getLyraAudioStream(currentTrack.videoId, currentTrack.title, currentTrack.artist) || await getDeezerPreview(currentTrack.title, currentTrack.artist);
+        const streamUrl = await getLyraAudioStream(currentTrack.videoId, currentTrack.title, currentTrack.artist);
         if (streamUrl && audioRef.current) {
-          console.log('[AudioEngine] Passage au flux de secours audio');
+          console.log('[AudioEngine] Passage au flux de secours audio direct');
           activeEngineRef.current = 'audio';
           
-          // Ensure HTTPS and wrap in CORS proxy if needed for production
+          // Si le flux est déjà sur notre endpoint /api/stream ou en HTTPS direct
           const finalUrl = streamUrl.startsWith('http://') ? streamUrl.replace('http://', 'https://') : streamUrl;
-          const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(finalUrl)}`;
           
-          audioRef.current.src = proxiedUrl;
+          audioRef.current.src = finalUrl;
           audioRef.current.currentTime = 0;
           audioRef.current.play().catch((err) => {
             console.error('[AudioEngine] Audio fallback failed:', err);
-            setError("Lecture impossible pour ce titre (CORS/SSL).");
+            setError("Lecture impossible pour ce titre.");
           });
           setIsPlaying(true);
           setIsLoading(false);
