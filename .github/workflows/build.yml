@@ -17,23 +17,28 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci || npm install
+
+      - name: Build Web Assets
+        env:
+          VITE_IS_APP: "true"
+        run: npm run build
 
       - name: Build Electron App
         env:
           VITE_IS_APP: "true"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run electron:build
+        run: npx electron-builder --windows nsis:ia32 nsis:x64
 
       - name: Upload Windows Executable (.exe)
         uses: actions/upload-artifact@v4
         with:
           name: Windows-Executable
-          path: dist_electron/*.exe
+          path: dist/*.exe
 
   build-apk:
     name: Build Android App (.apk)
@@ -45,7 +50,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Setup Java JDK
@@ -58,12 +63,15 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci || npm install
 
       - name: Build Web Assets for Capacitor
         env:
           VITE_IS_APP: "true"
         run: npm run build
+
+      - name: Add Android Platform if missing
+        run: npx cap add android || true
 
       - name: Sync Capacitor Android Project
         run: npx cap sync android
