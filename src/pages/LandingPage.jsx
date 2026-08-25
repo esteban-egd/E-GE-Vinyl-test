@@ -221,7 +221,7 @@ const LandingPage = ({ onBackToPresentation }) => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 bg-gradient-to-r from-[#e1bb72] to-[#c29e5a] text-[#0d0c0b] font-black uppercase tracking-wider text-xs rounded-xl hover:opacity-95 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-[#c29e5a]/10 cursor-pointer mt-4"
+                className="w-full py-2.5 bg-gradient-to-r from-[#e1bb72] to-[#c29e5a] text-[#0d0c0b] font-black uppercase tracking-wider text-xs rounded-xl hover:opacity-95 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-[#c29e5a]/10 cursor-pointer mt-3"
               >
                 {loading ? (
                   <div className="w-4 h-4 border-2 border-[#0d0c0b]/35 border-t-[#0d0c0b] rounded-full animate-spin" />
@@ -231,6 +231,20 @@ const LandingPage = ({ onBackToPresentation }) => {
                     <span>Se connecter</span>
                   </div>
                 )}
+              </button>
+
+              <div className="relative flex items-center justify-center my-1">
+                <span className="absolute inset-x-0 h-[1px] bg-white/[0.03]" />
+                <span className="relative px-2.5 text-[8.5px] font-black text-gray-600 uppercase bg-[#0c0a09]/10 tracking-widest">OU</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGuestLogin}
+                className="w-full py-2 px-4 bg-[#c29e5a]/10 hover:bg-[#c29e5a]/20 border border-[#c29e5a]/20 text-[#c29e5a] text-[10px] font-black uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-[#c29e5a]" />
+                <span>Lancer le Lecteur (Mode Démo)</span>
               </button>
             </form>
           ) : (

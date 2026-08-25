@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Download, User } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import ProfileModal from '../profile/ProfileModal';
 
@@ -35,10 +36,10 @@ export default function Header() {
 
   return (
     <header className="flex items-center justify-between px-6 h-16 safe-top bg-[#0d0c0b] z-40 border-b border-white/5">
-      <div className="flex items-center gap-1.5 md:hidden">
+      <Link to="/" className="flex items-center gap-1.5 md:hidden hover:opacity-80 transition-opacity">
         <span className="text-display text-2xl font-black tracking-tighter text-[var(--color-brass)] uppercase">E</span>
         <span className="text-display text-xl font-light tracking-widest text-white uppercase">GE</span>
-      </div>
+      </Link>
 
       <div className="flex items-center gap-4">
         {isInstallable && (

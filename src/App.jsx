@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
 import { AudioProvider, useAudio } from './context/AudioContext';
@@ -25,7 +25,7 @@ import OfflineNotice from './components/common/OfflineNotice';
 import OfflineSyncBar from './components/common/OfflineSyncBar';
 
 function AppContent() {
-  const { user, loading } = useAuth();
+  const { user, loading, signInAsGuest } = useAuth();
   const { currentTrack } = useAudio();
   const location = useLocation();
   const [showLoginOnWeb, setShowLoginOnWeb] = useState(false);
@@ -50,7 +50,10 @@ function AppContent() {
       return (
         <>
           <OfflineNotice />
-          <PresentationPage onEnterWebPlayer={() => setShowLoginOnWeb(true)} />
+          <PresentationPage 
+            onEnterWebPlayer={() => setShowLoginOnWeb(true)} 
+            onEnterAsGuest={signInAsGuest} 
+          />
         </>
       );
     }
@@ -95,6 +98,8 @@ function AppContent() {
               <Route path="/artist/:artistName" element={<ArtistPage />} />
               <Route path="/library" element={<LibraryPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/accueil" element={<Navigate to="/" replace />} />
+              <Route path="/acceuil" element={<Navigate to="/" replace />} />
             </Routes>
           </main>
 

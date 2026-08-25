@@ -1,8 +1,8 @@
 import { motion } from 'motion/react';
-import { Download, Play, Music, Radio, Shield, Laptop, Smartphone, ExternalLink } from 'lucide-react';
+import { Download, Play, Music, Radio, Shield, Laptop, Smartphone, ExternalLink, ShieldCheck } from 'lucide-react';
 import ConstellationBackground from '../components/common/ConstellationBackground';
 
-export default function PresentationPage({ onEnterWebPlayer }) {
+export default function PresentationPage({ onEnterWebPlayer, onEnterAsGuest }) {
   // Mock download links (pointing to releases or source downloaders)
   const downloadLinks = {
     windows: 'https://github.com/guillermine/E-GE-Vinyl/releases/latest',
@@ -26,12 +26,20 @@ export default function PresentationPage({ onEnterWebPlayer }) {
           </div>
         </div>
         
-        <button
-          onClick={onEnterWebPlayer}
-          className="px-4 py-1.5 border border-[#c29e5a]/30 hover:border-[#c29e5a] text-[#c29e5a] text-[10px] uppercase tracking-widest font-black rounded-lg transition-all cursor-pointer"
-        >
-          Se connecter
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onEnterAsGuest}
+            className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-gray-300 text-[10px] uppercase tracking-widest font-bold rounded-lg transition-all cursor-pointer border border-white/5"
+          >
+            Mode Démo
+          </button>
+          <button
+            onClick={onEnterWebPlayer}
+            className="px-4 py-1.5 border border-[#c29e5a]/30 hover:border-[#c29e5a] text-[#c29e5a] text-[10px] uppercase tracking-widest font-black rounded-lg transition-all cursor-pointer"
+          >
+            Se connecter
+          </button>
+        </div>
       </header>
 
       {/* Main Presentation Body */}
@@ -56,7 +64,7 @@ export default function PresentationPage({ onEnterWebPlayer }) {
         </div>
 
         {/* Call to Actions */}
-        <div className="flex flex-col items-center gap-6 w-full max-w-md shrink-0">
+        <div className="flex flex-col items-center gap-4 w-full max-w-md shrink-0">
           
           {/* Main Web Access Button */}
           <button
@@ -65,6 +73,15 @@ export default function PresentationPage({ onEnterWebPlayer }) {
           >
             <Play size={15} fill="currentColor" className="stroke-none" />
             <span>Lancer Le Web Player</span>
+          </button>
+
+          {/* Quick Demo Option */}
+          <button
+            onClick={onEnterAsGuest}
+            className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/5 text-gray-300 hover:text-white text-[11px] font-bold uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4 text-[#c29e5a]" />
+            <span>Tester le Lecteur en Mode Invité (Sans Inscription)</span>
           </button>
 
           {/* Native Download Block */}

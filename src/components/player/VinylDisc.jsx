@@ -1,6 +1,6 @@
 import { useAudio } from '../../context/AudioContext';
 
-export default function VinylDisc({ thumbnail, speed = 33, rotationAngle = 0, isDragging = false }) {
+export default function VinylDisc({ thumbnail, speed = 33, rotationAngle = 0, isDragging = false, isEmpty = false }) {
   const { isPlaying, isLoading } = useAudio();
 
   const animationClass = isPlaying 
@@ -21,55 +21,59 @@ export default function VinylDisc({ thumbnail, speed = 33, rotationAngle = 0, is
     <div className="relative w-full h-full flex items-center justify-center select-none">
       {/* 1. DISQUE VINYLE PHYSIQUE - CHÂSSIS DE BASE */}
       <div 
-        className="w-full h-full rounded-full bg-[#0d0c0b] shadow-[0_15px_40px_rgba(0,0,0,0.9),inset_0_0_0_1px_rgba(255,255,255,0.05),inset_0_0_0_6px_#141312] flex items-center justify-center relative overflow-hidden transition-colors duration-1000"
+        className={`w-full h-full rounded-full shadow-[0_15px_40px_rgba(0,0,0,0.9),inset_0_0_0_1px_rgba(255,255,255,0.05),inset_0_0_0_6px_#141312] flex items-center justify-center relative overflow-hidden transition-colors duration-1000 ${
+          isEmpty ? 'bg-gradient-to-br from-[#1c1a17] via-[#12110f] to-[#0d0c0a]' : 'bg-[#0d0c0b]'
+        }`}
       >
         {/* 2. LES SILLONS MICROGRAVÉS */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 400 400">
           <defs>
             <radialGradient id="vinyl-base" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#1a1816" />
-              <stop offset="60%" stopColor="#0d0c0b" />
-              <stop offset="100%" stopColor="#040404" />
+              <stop offset="0%" stopColor={isEmpty ? "#282522" : "#1a1816"} />
+              <stop offset="60%" stopColor={isEmpty ? "#171513" : "#0d0c0b"} />
+              <stop offset="100%" stopColor={isEmpty ? "#0e0d0c" : "#040404"} />
             </radialGradient>
           </defs>
           <circle cx="200" cy="200" r="198" fill="url(#vinyl-base)" />
           
           {/* Track bands remain mostly black but very subtly tint based on color variable */}
-          <circle cx="200" cy="200" r="190" stroke="color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.03) 95%)" strokeWidth="0.5" fill="none" />
-          <circle cx="200" cy="200" r="186" stroke="color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.02) 95%)" strokeWidth="0.5" fill="none" />
-          <circle cx="200" cy="200" r="182" stroke="color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.03) 95%)" strokeWidth="0.5" fill="none" />
-          <circle cx="200" cy="200" r="178" stroke="color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.02) 95%)" strokeWidth="0.5" fill="none" />
-          <circle cx="200" cy="200" r="174" stroke="color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.03) 95%)" strokeWidth="0.5" fill="none" />
-          <circle cx="200" cy="200" r="170" stroke="color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.02) 95%)" strokeWidth="0.5" fill="none" />
+          <circle cx="200" cy="200" r="190" stroke={isEmpty ? "rgba(255, 255, 255, 0.015)" : "color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.03) 95%)"} strokeWidth="0.5" fill="none" />
+          <circle cx="200" cy="200" r="186" stroke={isEmpty ? "rgba(255, 255, 255, 0.01)" : "color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.02) 95%)"} strokeWidth="0.5" fill="none" />
+          <circle cx="200" cy="200" r="182" stroke={isEmpty ? "rgba(255, 255, 255, 0.015)" : "color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.03) 95%)"} strokeWidth="0.5" fill="none" />
+          <circle cx="200" cy="200" r="178" stroke={isEmpty ? "rgba(255, 255, 255, 0.01)" : "color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.02) 95%)"} strokeWidth="0.5" fill="none" />
+          <circle cx="200" cy="200" r="174" stroke={isEmpty ? "rgba(255, 255, 255, 0.015)" : "color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.03) 95%)"} strokeWidth="0.5" fill="none" />
+          <circle cx="200" cy="200" r="170" stroke={isEmpty ? "rgba(255, 255, 255, 0.01)" : "color-mix(in srgb, var(--ambilight-color, transparent), rgba(255,255,255, 0.02) 95%)"} strokeWidth="0.5" fill="none" />
           
-          {/* SILENT GAPs */}
-          <circle cx="200" cy="200" r="166" stroke="rgba(0,0,0,0.8)" strokeWidth="1.5" fill="none" />
-          <circle cx="200" cy="200" r="138" stroke="rgba(0,0,0,0.8)" strokeWidth="1.5" fill="none" />
-          <circle cx="200" cy="200" r="114" stroke="rgba(0,0,0,0.8)" strokeWidth="1.5" fill="none" />
-          <circle cx="200" cy="200" r="90" stroke="rgba(0,0,0,0.95)" strokeWidth="3" fill="none" />
+          {/* SILENT GAPs / Rubber Platter Grooves if empty */}
+          <circle cx="200" cy="200" r="166" stroke={isEmpty ? "rgba(255,255,255,0.015)" : "rgba(0,0,0,0.8)"} strokeWidth="1.5" fill="none" />
+          <circle cx="200" cy="200" r="138" stroke={isEmpty ? "rgba(255,255,255,0.015)" : "rgba(0,0,0,0.8)"} strokeWidth="1.5" fill="none" />
+          <circle cx="200" cy="200" r="114" stroke={isEmpty ? "rgba(255,255,255,0.015)" : "rgba(0,0,0,0.8)"} strokeWidth="1.5" fill="none" />
+          <circle cx="200" cy="200" r="90" stroke={isEmpty ? "rgba(255,255,255,0.02)" : "rgba(0,0,0,0.95)"} strokeWidth="3" fill="none" />
         </svg>
 
         {/* 3. REFLETS CHANDELLES LUMINEUX (Conic sheer reflections that rotate dynamically) */}
-        <div 
-          className={`absolute inset-0 rounded-full mix-blend-screen pointer-events-none ${isDragging ? '' : animationClass}`}
-          style={{
-            ...sheenStyle,
-            background: `conic-gradient(
-              from 0deg,
-              transparent 0deg,
-              rgba(255,255,255,0.07) 20deg,
-              rgba(255,255,255,0.11) 35deg,
-              rgba(255,255,255,0.07) 50deg,
-              transparent 75deg,
-              transparent 180deg,
-              rgba(255,255,255,0.07) 200deg,
-              rgba(255,255,255,0.11) 215deg,
-              rgba(255,255,255,0.07) 230deg,
-              transparent 255deg,
-              transparent 360deg
-            )`
-          }}
-        />
+        {!isEmpty && (
+          <div 
+            className={`absolute inset-0 rounded-full mix-blend-screen pointer-events-none ${isDragging ? '' : animationClass}`}
+            style={{
+              ...sheenStyle,
+              background: `conic-gradient(
+                from 0deg,
+                transparent 0deg,
+                rgba(255,255,255,0.07) 20deg,
+                rgba(255,255,255,0.11) 35deg,
+                rgba(255,255,255,0.07) 50deg,
+                transparent 75deg,
+                transparent 180deg,
+                rgba(255,255,255,0.07) 200deg,
+                rgba(255,255,255,0.11) 215deg,
+                rgba(255,255,255,0.07) 230deg,
+                transparent 255deg,
+                transparent 360deg
+              )`
+            }}
+          />
+        )}
 
         {/* 4. MACARON CENTRAL EN PAPIER (Retro vintage center record label) */}
         <div 
@@ -80,7 +84,7 @@ export default function VinylDisc({ thumbnail, speed = 33, rotationAngle = 0, is
           }}
         >
           {/* Pochette de l'album en fond avec floutage chic */}
-          {thumbnail ? (
+          {!isEmpty && thumbnail ? (
             <img 
               src={thumbnail}
               alt="Pochette Vinyle"
@@ -95,19 +99,26 @@ export default function VinylDisc({ thumbnail, speed = 33, rotationAngle = 0, is
               }}
             />
           ) : (
-            <div className="absolute inset-0 bg-stone-950 opacity-40" />
+            <div className="absolute inset-0 bg-stone-950/90 flex flex-col items-center justify-center p-2 text-center select-none">
+              <span className="text-[7px] text-[#c29e5a] font-mono tracking-[0.25em] font-black uppercase leading-none">
+                E-GE
+              </span>
+              <span className="text-[5.5px] text-gray-500 font-mono tracking-widest mt-1 leading-none uppercase">
+                VINYL STUDIO
+              </span>
+            </div>
           )}
 
           {/* Décorations circulaires dorées rétro du macaron */}
           <div className="absolute inset-2 rounded-full border border-[#c29e5a]/30 flex flex-col items-center justify-between p-2 select-none">
             {/* Texte du haut */}
             <span className="text-[6px] tracking-[0.2em] font-mono text-[#e6dfd5]/80 font-bold leading-none mt-1 uppercase">
-              HIGH FIDELITY
+              {isEmpty ? "REPOSE-VINYLE" : "HIGH FIDELITY"}
             </span>
 
             {/* Texte du bas */}
             <span className="text-[6.5px] tracking-[0.15em] font-mono text-[#c29e5a] font-bold leading-none mb-1">
-              {speed} RPM • STEREO
+              {isEmpty ? "PRET POUR L'ECOUTE" : `${speed} RPM • STEREO`}
             </span>
           </div>
 

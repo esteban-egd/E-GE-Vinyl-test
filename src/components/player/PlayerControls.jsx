@@ -40,7 +40,27 @@ export default function PlayerControls() {
     seek(value);
   };
 
-  if (!currentTrack) return null;
+  if (!currentTrack) {
+    return (
+      <div className="w-full max-w-md mx-auto px-6 py-8 flex flex-col items-center text-center gap-4 z-10 bg-[#120f0a]/90 border border-[#2d1c12] rounded-3xl mt-4 shadow-2xl relative overflow-hidden">
+        <div className="w-12 h-12 rounded-full bg-[#c29e5a]/10 border border-[#c29e5a]/20 flex items-center justify-center text-[#c29e5a]">
+          <Plus size={20} />
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-sm font-black text-white uppercase tracking-wider">Aucun Vinyle sélectionné</h3>
+          <p className="text-[11px] text-gray-400 max-w-[260px] leading-relaxed mx-auto">
+            Sélectionnez une musique pour la charger sur la platine et lancer l'écoute.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/')}
+          className="px-4 py-2 bg-gradient-to-r from-[#e1bb72] to-[#c29e5a] text-[#0d0c0b] text-[10px] font-black uppercase tracking-widest rounded-xl hover:scale-[1.03] active:scale-[0.97] transition-all shadow-md cursor-pointer"
+        >
+          Parcourir les Albums
+        </button>
+      </div>
+    );
+  }
 
   const trackLiked = isLiked(currentTrack);
   const trackDownloaded = isDownloaded(currentTrack.videoId);

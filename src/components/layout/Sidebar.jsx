@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, Link } from 'react-router-dom';
 import { Home, Search, Library, Settings, Disc3, LogOut } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
@@ -28,9 +28,9 @@ export default function Sidebar() {
   return (
     <aside className="w-64 h-full bg-[#0d0c0b] border-r border-white/[0.04] flex flex-col z-50 transition-all duration-300">
       <div className="p-6 flex flex-col gap-1 shrink-0">
-        <div className="flex items-center gap-2.5">
+        <Link to="/" className="flex items-center gap-2.5 group hover:opacity-90 transition-all">
           <div 
-            className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg transition-transform duration-300"
+            className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg transition-transform duration-300 group-hover:scale-105"
             style={{ 
               background: '#c29e5a',
               boxShadow: '0 0 15px rgba(194, 158, 90, 0.25)'
@@ -42,7 +42,7 @@ export default function Sidebar() {
             <span className="text-lg font-black tracking-tighter text-white uppercase">E-GE</span>
             <span className="text-lg font-light tracking-widest ml-1 text-gray-500 uppercase">Vinyl</span>
           </div>
-        </div>
+        </Link>
         <span className="text-[9px] uppercase tracking-[0.25em] text-[#c29e5a] font-black mt-2">
           Salon Audiophile
         </span>

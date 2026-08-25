@@ -92,6 +92,45 @@ export default function HomePage() {
 
       <div className="space-y-12 py-6">
 
+        {/* EXCLUSIVE 3D VINYL PLAYER BANNER */}
+        <div 
+          onClick={() => navigate('/player')}
+          className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#141210] to-[#0c0a09] border border-white/[0.04] p-6 sm:p-8 flex flex-col md:flex-row items-center justify-between gap-6 hover:border-[#c29e5a]/30 transition-all duration-300 cursor-pointer shadow-[0_20px_40px_rgba(0,0,0,0.5)] group"
+        >
+          {/* Glowing Golden Aura behind content */}
+          <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-[#c29e5a]/5 blur-3xl group-hover:bg-[#c29e5a]/10 transition-all duration-500" />
+          
+          <div className="flex flex-col sm:flex-row items-center gap-5 text-center sm:text-left z-10">
+            <div className="w-16 h-16 rounded-2xl bg-black/40 border border-white/5 flex items-center justify-center text-[#c29e5a] shadow-inner group-hover:scale-105 transition-transform duration-500 shrink-0 relative overflow-hidden">
+              <Disc size={32} className="animate-spin-slow text-[#c29e5a] relative z-10" />
+              <div className="absolute inset-0 bg-gradient-to-tr from-[#c29e5a]/10 to-transparent opacity-50" />
+            </div>
+            
+            <div className="space-y-1">
+              <span className="text-[#c29e5a] text-[9px] font-black uppercase tracking-[0.25em] bg-[#c29e5a]/10 border border-[#c29e5a]/20 px-2.5 py-1 rounded-full inline-block">
+                Expérience Unique
+              </span>
+              <h2 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight">
+                Platine Vinyle Interactive 3D
+              </h2>
+              <p className="text-xs text-gray-400 max-w-md leading-relaxed font-medium">
+                Contrôlez physiquement le vinyle, posez le diamant de lecture, ajustez le pitch et écoutez vos titres préférés.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate('/player');
+            }}
+            className="px-5 py-3 bg-gradient-to-r from-[#e1bb72] to-[#c29e5a] text-[#0d0c0b] font-black uppercase tracking-widest text-[10px] rounded-xl hover:scale-[1.03] active:scale-[0.97] transition-all flex items-center gap-2 shadow-md shrink-0 cursor-pointer z-10"
+          >
+            <Play size={10} fill="currentColor" className="stroke-none" />
+            <span>Ouvrir la Platine</span>
+          </button>
+        </div>
+
         {/* SECTION 1 : VRAIES NOUVEAUTÉS & SORTIES RÉCENTES (2024-2026) */}
         <div>
           <div className="flex items-center justify-between mb-5">
