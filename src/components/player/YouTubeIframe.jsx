@@ -7,6 +7,7 @@ import { useAudio } from '../../context/AudioContext';
  */
 export default function YouTubeIframe() {
   const { setIframePlayer, onIframeStateChange, onIframeError } = useAudio();
+  const containerRef = useRef(null);
   const playerRef = useRef(null);
   const isInitializedRef = useRef(false);
 
@@ -16,13 +17,11 @@ export default function YouTubeIframe() {
     function initPlayer() {
       if (playerRef.current || isInitializedRef.current) return;
       if (!window.YT || !window.YT.Player) return;
-
-      const container = document.getElementById('yt-hidden-engine');
-      if (!container) return;
+      if (!containerRef.current) return;
 
       isInitializedRef.current = true;
       try {
-        new window.YT.Player('yt-hidden-engine', {
+        new window.YT.Player(containerRef.current, {
           height: '100%',
           width: '100%',
           videoId: '',
@@ -33,8 +32,6 @@ export default function YouTubeIframe() {
             fs: 0,
             modestbranding: 1,
             playsinline: 1,
-            enablejsapi: 1,
-            origin: window.location.origin,
             rel: 0,
             iv_load_policy: 3,
           },
@@ -85,6 +82,21 @@ export default function YouTubeIframe() {
         initPlayer();
       };
     }
+
+    return () => {
+      try {
+        if (playerRef.current && typeof playerRef.current.destroy === 'function') {
+          playerRef.current.destroy();
+          playerRef.current = null;
+        }
+        isInitializedRef.current = false;
+        if (setIframePlayer) {
+          setIframePlayer(null);
+        }
+      } catch (err) {
+        console.warn('[YouTubeIframeEngine] Erreur lors du destroy:', err);
+      }
+    };
   }, [setIframePlayer, onIframeStateChange, onIframeError]);
 
   return (
@@ -103,9 +115,10 @@ export default function YouTubeIframe() {
         overflow: 'hidden',
       }}
     >
-      <div id="yt-hidden-engine" className="w-full h-full" />
+      <div ref={containerRef} id="yt-hidden-engine" className="w-full h-full" />
     </div>
   );
 }
 
 export const YouTubeIframeEngine = YouTubeIframe;
+

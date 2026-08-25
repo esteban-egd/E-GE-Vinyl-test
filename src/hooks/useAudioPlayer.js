@@ -353,16 +353,23 @@ export function useAudioPlayer() {
 
   // --- Enregistrement de l'Iframe YouTube ---
   const setIframePlayer = useCallback((player) => {
-    console.log('[AudioEngine] Iframe Player enregistré avec succès');
     iframePlayerRef.current = player;
     
-    if (pendingTrackRef.current) {
+    if (player && typeof player.loadVideoById === 'function' && pendingTrackRef.current) {
       const track = pendingTrackRef.current;
       pendingTrackRef.current = null;
       activeEngineRef.current = 'iframe';
-      player.loadVideoById(track.videoId, 0);
-      player.playVideo();
-      player.setVolume(Math.round(volume * 100));
+      try {
+        player.loadVideoById(track.videoId, 0);
+        if (typeof player.setVolume === 'function') {
+          player.setVolume(Math.round(volume * 100));
+        }
+        if (typeof player.playVideo === 'function') {
+          player.playVideo();
+        }
+      } catch (err) {
+        console.warn('[AudioEngine] Erreur lancement track en attente:', err);
+      }
     }
   }, [volume]);
 
