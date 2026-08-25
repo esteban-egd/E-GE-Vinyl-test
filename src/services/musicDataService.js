@@ -314,12 +314,12 @@ export async function searchUnified(query) {
       { signal: AbortSignal.timeout(2500) }
     ).then(res => res.json()).catch(() => ({ results: [] }));
 
-    const deezerSearchPromise = fetch(`/api/deezer-search?q=${encodeURIComponent(query)}`, {
-      signal: AbortSignal.timeout(2500)
+    const deezerSearchPromise = fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=25`)}`, {
+      signal: AbortSignal.timeout(3000)
     }).then(res => res.json()).catch(() => ({ data: [] }));
 
-    const deezerArtistPromise = fetch(`/api/deezer-artist?q=${encodeURIComponent(query)}`, {
-      signal: AbortSignal.timeout(2500)
+    const deezerArtistPromise = fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search/artist?q=${encodeURIComponent(query)}&limit=10`)}`, {
+      signal: AbortSignal.timeout(3000)
     }).then(res => res.json()).catch(() => ({ data: [] }));
 
     const lyraSearchPromise = searchYouTubeMusic(query).catch(() => []);
@@ -344,7 +344,7 @@ export async function searchUnified(query) {
 
     if (matchedArtist && matchedArtist.id) {
       try {
-        const topRes = await fetch(`/api/deezer-artist-top?id=${matchedArtist.id}`, { signal: AbortSignal.timeout(1500) });
+        const topRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/artist/${matchedArtist.id}/top?limit=50`)}`, { signal: AbortSignal.timeout(2500) });
         if (topRes.ok) {
           const topData = await topRes.json();
           if (topData && Array.isArray(topData.data)) {
@@ -821,7 +821,7 @@ export async function fetchTheAudioDbArtistVisuals(artistName) {
 
   // 1. Essai Deezer via proxy backend (très haute qualité pour les artistes majeurs)
   try {
-    const dzRes = await fetch(`/api/deezer-artist?q=${encodeURIComponent(mainName)}`, {
+    const dzRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search/artist?q=${encodeURIComponent(mainName)}&limit=10`)}`, {
       signal: AbortSignal.timeout(3000)
     });
     if (dzRes.ok) {
@@ -933,8 +933,8 @@ export async function getArtistDetails(artistName) {
     let dzAlbums = [];
 
     try {
-      const dzArtistRes = await fetch(`/api/deezer-artist?q=${encodeURIComponent(cleanName)}`, {
-        signal: AbortSignal.timeout(4000)
+      const dzArtistRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search/artist?q=${encodeURIComponent(cleanName)}&limit=10`)}`, {
+        signal: AbortSignal.timeout(5000)
       });
       if (dzArtistRes.ok) {
         const dzArtistData = await dzArtistRes.json();
@@ -943,8 +943,8 @@ export async function getArtistDetails(artistName) {
 
           if (dzArtist && dzArtist.id) {
             const [topRes, albRes] = await Promise.all([
-              fetch(`/api/deezer-artist-top?id=${dzArtist.id}`, { signal: AbortSignal.timeout(4000) }).then(r => r.json()).catch(() => ({ data: [] })),
-              fetch(`/api/deezer-artist-albums?id=${dzArtist.id}`, { signal: AbortSignal.timeout(4000) }).then(r => r.json()).catch(() => ({ data: [] }))
+              fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/artist/${dzArtist.id}/top?limit=50`)}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] })),
+              fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/artist/${dzArtist.id}/albums?limit=50`)}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] }))
             ]);
             dzTopTracks = topRes?.data || [];
             dzAlbums = albRes?.data || [];
@@ -958,8 +958,8 @@ export async function getArtistDetails(artistName) {
     // 2. Deezer Search direct pour trouver tous les morceaux de l'artiste
     let dzSearchTracks = [];
     try {
-      const dzSearchRes = await fetch(`/api/deezer-search?q=artist:"${encodeURIComponent(cleanName)}"`, {
-        signal: AbortSignal.timeout(4000)
+      const dzSearchRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search?q=artist:"${encodeURIComponent(cleanName)}"`)}`, {
+        signal: AbortSignal.timeout(5000)
       });
       if (dzSearchRes.ok) {
         const data = await dzSearchRes.json();
@@ -972,8 +972,8 @@ export async function getArtistDetails(artistName) {
     // Si la recherche ciblée artiste n'a rien donné, recherche générale
     if (dzSearchTracks.length === 0) {
       try {
-        const dzGeneralRes = await fetch(`/api/deezer-search?q=${encodeURIComponent(cleanName)}`, {
-          signal: AbortSignal.timeout(4000)
+        const dzGeneralRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search?q=${encodeURIComponent(cleanName)}`)}`, {
+          signal: AbortSignal.timeout(5000)
         });
         if (dzGeneralRes.ok) {
           const data = await dzGeneralRes.json();
@@ -1130,7 +1130,8 @@ export async function getArtistDetails(artistName) {
       const topAlbumsToFetch = albums.filter(a => a.deezerId).slice(0, 3);
       for (const alb of topAlbumsToFetch) {
         try {
-          const albTracksRes = await fetch(`/api/deezer-album-tracks?id=${alb.deezerId}`, {
+          const targetUrl = `https://api.deezer.com/album/${alb.deezerId}/tracks?limit=100`;
+          const albTracksRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, {
             signal: AbortSignal.timeout(3000)
           });
           if (albTracksRes.ok) {
@@ -1349,7 +1350,8 @@ export async function getAlbumTracks(album, artistName) {
   // 1. Si on a un deezerId
   if (album.deezerId) {
     try {
-      const res = await fetch(`/api/deezer-album-tracks?id=${album.deezerId}`);
+      const targetUrl = `https://api.deezer.com/album/${album.deezerId}/tracks?limit=100`;
+      const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`);
       if (res.ok) {
         const data = await res.json();
         if (data && Array.isArray(data.data)) {

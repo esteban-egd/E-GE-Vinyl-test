@@ -379,14 +379,24 @@ export function useAudioPlayer() {
         if (streamUrl && audioRef.current) {
           console.log('[AudioEngine] Passage au flux de secours audio');
           activeEngineRef.current = 'audio';
-          audioRef.current.src = streamUrl;
+          
+          // Ensure HTTPS and wrap in CORS proxy if needed for production
+          const finalUrl = streamUrl.startsWith('http://') ? streamUrl.replace('http://', 'https://') : streamUrl;
+          const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(finalUrl)}`;
+          
+          audioRef.current.src = proxiedUrl;
           audioRef.current.currentTime = 0;
-          audioRef.current.play().catch(() => {});
+          audioRef.current.play().catch((err) => {
+            console.error('[AudioEngine] Audio fallback failed:', err);
+            setError("Lecture impossible pour ce titre (CORS/SSL).");
+          });
           setIsPlaying(true);
           setIsLoading(false);
           return;
         }
-      } catch {}
+      } catch (err) {
+        console.error('[AudioEngine] Fallback resolution failed:', err);
+      }
     }
     setError("Lecture impossible pour ce titre.");
     setIsLoading(false);
@@ -417,6 +427,21 @@ export function useAudioPlayer() {
       console.warn('[MediaSession] Erreur metadata:', err);
     }
   }, []);
+
+  // --- Watchdog: Détecter le blocage à 00:00 ---
+  useEffect(() => {
+    if (!isPlaying || isLoading || activeEngineRef.current !== 'iframe') return;
+
+    // Si après 6 secondes on est toujours à 00:00 alors qu'on est censé jouer
+    const watchdog = setTimeout(() => {
+      if (currentTime === 0 && isPlaying && !isLoading) {
+        console.warn('[AudioEngine] Blocage 00:00 détecté sur IFrame, passage au fallback...');
+        onIframeError(999);
+      }
+    }, 6000);
+
+    return () => clearTimeout(watchdog);
+  }, [currentTime, isPlaying, isLoading, onIframeError]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;

@@ -131,7 +131,10 @@ export async function searchYouTubeMusic(query) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2000);
       try {
-        const res = await fetch(`${instance}/search?q=${encodeURIComponent(query)}&filter=music_songs`, {
+        const targetUrl = `${instance}/search?q=${encodeURIComponent(query)}&filter=music_songs`;
+        const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+        
+        const res = await fetch(proxiedUrl, {
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -167,7 +170,10 @@ export async function searchYouTubeMusic(query) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2000);
         try {
-          const res = await fetch(`${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video`, {
+          const targetUrl = `${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
+          const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+          
+          const res = await fetch(proxiedUrl, {
             signal: controller.signal
           });
           clearTimeout(timeoutId);
@@ -227,7 +233,10 @@ export async function getLyraAudioStream(videoId, title = "", artist = "") {
     });
     if (cobaltRes.ok) {
       const data = await cobaltRes.json();
-      if (data?.url) return data.url;
+      if (data?.url) {
+        // Force HTTPS for production environments
+        return data.url.replace('http://', 'https://');
+      }
     }
   } catch (e) {
     console.warn("Cobalt resolution failed");
@@ -248,17 +257,22 @@ export async function getLyraAudioStream(videoId, title = "", artist = "") {
       if (res.ok) {
         const data = await res.json();
         const bestStream = (data.audioStreams || []).find(s => s.format === "M4A") || data.audioStreams?.[0];
-        if (bestStream?.url) return bestStream.url;
+        if (bestStream?.url) {
+          // Force HTTPS
+          return bestStream.url.replace('http://', 'https://');
+        }
       }
     } catch (e) {}
   }
 
-  // 3. Fallback Deezer (30s preview) - Toujours fonctionnel
+  // 3. Fallback Deezer (30s preview) - Toujours fonctionnel et HTTPS
   if (title) {
     try {
       const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://api.deezer.com/search?q=${encodeURIComponent(`${artist} ${title}`)}&limit=1`)}`);
       const data = await res.json();
-      if (data?.data?.[0]?.preview) return data.data[0].preview;
+      if (data?.data?.[0]?.preview) {
+        return data.data[0].preview.replace('http://', 'https://');
+      }
     } catch (e) {}
   }
 

@@ -72,44 +72,19 @@ export async function searchLyraTracks(query) {
   };
 
   try {
-    // 1. Essai direct / via backend proxy pour bypass CORS
-    let response;
-    try {
-      response = await fetch("/api/innertube-search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(6000)
-      });
-    } catch {
-      // Fallback vers l'URL directe
-      response = await fetch(YT_MUSIC_SEARCH_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(6000)
-      });
-    }
-
-    if (response && response.ok) {
-      const data = await response.json();
-      const tracks = extractTracksFromData(data);
-      if (tracks.length > 0) return tracks;
-    }
-  } catch (error) {
-    console.error("Erreur de recherche Lyra :", error);
-  }
-
-  // Fallback direct avec Piped API si Innertube direct est restreint
-  try {
+    // Essayer les instances Piped API directement (plus fiables en prod sans backend proxy)
     const PIPED_INSTANCES = [
       'https://pipedapi.kavin.rocks',
       'https://api.piped.privacydev.net',
+      'https://pipedapi.mha.fi',
       'https://pipedapi.adminforge.de'
     ];
     for (const inst of PIPED_INSTANCES) {
       try {
-        const res = await fetch(`${inst}/search?q=${encodeURIComponent(query)}&filter=music_songs`, {
+        const targetUrl = `${inst}/search?q=${encodeURIComponent(query)}&filter=music_songs`;
+        const proxiedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+        
+        const res = await fetch(proxiedUrl, {
           signal: AbortSignal.timeout(3500)
         });
         if (!res.ok) continue;
@@ -129,8 +104,8 @@ export async function searchLyraTracks(query) {
         continue;
       }
     }
-  } catch (e) {
-    console.warn("Fallback Piped search error:", e);
+  } catch (error) {
+    console.error("Erreur de recherche Lyra :", error);
   }
 
   return [];
