@@ -20,6 +20,7 @@ import { useLikes } from '../hooks/useLikes';
 import { useNavigate } from 'react-router-dom';
 import { FEATURED_ARTISTS, TRENDING_TRACKS, normalizeArtistKey, isArtistMatch, getMainArtistName } from '../services/musicDataService';
 import ArtistAvatar from '../components/common/ArtistAvatar';
+import TrackImage from '../components/common/TrackImage';
 
 export default function SearchPage() {
   const { 
@@ -365,7 +366,7 @@ export default function SearchPage() {
                   >
                     <div className="flex items-start gap-4">
                       <div className="relative w-24 h-24 md:w-28 md:h-28 shrink-0 rounded-xl overflow-hidden shadow-2xl border border-white/10 group-hover:scale-105 transition-transform duration-300">
-                        <img 
+                        <TrackImage 
                           src={topTrack.thumbnail} 
                           alt={topTrack.title} 
                           className="w-full h-full object-cover" 
@@ -495,7 +496,7 @@ export default function SearchPage() {
                           className="relative w-11 h-11 shrink-0 rounded-lg overflow-hidden border"
                           style={{ borderColor: isThisActive ? `${currentTheme?.primary || '#1ED760'}50` : 'rgba(255,255,255,0.1)' }}
                         >
-                          <img src={track.thumbnail} alt={track.title} className="w-full h-full object-cover" />
+                          <TrackImage src={track.thumbnail} alt={track.title} className="w-full h-full object-cover" />
                           {isThisLoading && (
                             <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                               <Loader2 size={14} className="animate-spin" style={{ color: currentTheme?.primary }} />

@@ -242,35 +242,76 @@ async function startServer() {
       }
 
       // Mode 2 : Résolution du flux audio
+      const INVIDIOUS_INSTANCES = [
+        "https://invidious.nerdvpn.de",
+        "https://inv.tux.pizza",
+        "https://invidious.jing.rocks",
+        "https://invidious.privacyredirect.com",
+        "https://invidious.drgns.space",
+        "https://yt.artemislena.eu",
+        "https://invidious.projectsegfau.lt"
+      ];
+
       const PIPED_INSTANCES = [
         "https://pipedapi.kavin.rocks",
         "https://api.piped.privacydev.net",
-        "https://pipedapi.mha.fi",
         "https://pipedapi.adminforge.de",
+        "https://pipedapi.mha.fi",
         "https://piped-api.lunar.icu"
       ];
 
       let audioStreamUrl: string | null = null;
 
-      // 1. Cobalt
-      try {
-        const cobaltRes = await fetch("https://api.cobalt.tools/", {
-          method: "POST",
-          headers: { "Accept": "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: `https://www.youtube.com/watch?v=${videoId}`,
-            downloadMode: "audio",
-            audioFormat: "mp3"
-          }),
-          signal: AbortSignal.timeout(3500)
-        });
-        if (cobaltRes.ok) {
-          const data = await cobaltRes.json();
-          if (data?.url) audioStreamUrl = data.url.replace("http://", "https://");
-        }
-      } catch (e) {}
+      // 1. Invidious (haute disponibilité sans rate limit cloud)
+      for (const inst of INVIDIOUS_INSTANCES) {
+        try {
+          const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+            signal: AbortSignal.timeout(3200),
+            headers: { "User-Agent": "Mozilla/5.0 (compatible; LyraMusic/1.0)" }
+          });
+          if (invRes.ok) {
+            const data = await invRes.json();
+            const formats = [...(data.adaptiveFormats || []), ...(data.formatStreams || [])];
+            const audioFormats = formats.filter((f: any) =>
+              (f.type && f.type.includes("audio")) ||
+              (f.mimeType && f.mimeType.includes("audio"))
+            );
+            if (audioFormats.length > 0) {
+              audioFormats.sort((a: any, b: any) => {
+                const bitA = parseInt(a.bitrate || a.audioSampleRate || 0, 10);
+                const bitB = parseInt(b.bitrate || b.audioSampleRate || 0, 10);
+                return bitB - bitA;
+              });
+              if (audioFormats[0]?.url) {
+                audioStreamUrl = audioFormats[0].url.replace("http://", "https://");
+                break;
+              }
+            }
+          }
+        } catch (_) {}
+      }
 
-      // 2. Piped
+      // 2. Cobalt (direct)
+      if (!audioStreamUrl) {
+        try {
+          const cobaltRes = await fetch("https://api.cobalt.tools/", {
+            method: "POST",
+            headers: { "Accept": "application/json", "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url: `https://www.youtube.com/watch?v=${videoId}`,
+              downloadMode: "audio",
+              audioFormat: "mp3"
+            }),
+            signal: AbortSignal.timeout(3500)
+          });
+          if (cobaltRes.ok) {
+            const data = await cobaltRes.json();
+            if (data?.url) audioStreamUrl = data.url.replace("http://", "https://");
+          }
+        } catch (e) {}
+      }
+
+      // 3. Piped (avec tri de bitrate)
       if (!audioStreamUrl) {
         for (const inst of PIPED_INSTANCES) {
           try {
@@ -278,9 +319,9 @@ async function startServer() {
             if (pipedRes.ok) {
               const data = await pipedRes.json();
               const streams = data.audioStreams || [];
-              const best = streams.find((s: any) => s.format === "M4A" || s.mimeType?.includes("audio")) || streams[0];
-              if (best?.url) {
-                audioStreamUrl = best.url.replace("http://", "https://");
+              streams.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+              if (streams[0]?.url) {
+                audioStreamUrl = streams[0].url.replace("http://", "https://");
                 break;
               }
             }
@@ -293,9 +334,8 @@ async function startServer() {
           return res.redirect(audioStreamUrl);
         }
         return res.json({
-          success: true,
-          videoId,
           url: audioStreamUrl,
+          videoId,
           proxiedUrl: `/api/stream?url=${encodeURIComponent(audioStreamUrl)}`
         });
       }

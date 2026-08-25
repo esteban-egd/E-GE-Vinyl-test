@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAudio } from '../../context/AudioContext';
 import { useLikes } from '../../hooks/useLikes';
 import { Play, Pause, Volume2, VolumeX, Heart } from 'lucide-react';
+import TrackImage from '../common/TrackImage';
 
 export default function DynamicIsland() {
   const { currentTrack, isPlaying, togglePlayPause, audioRef } = useAudio();
@@ -45,7 +46,7 @@ export default function DynamicIsland() {
       {/* Collapsed Mode */}
       <div className={`flex items-center justify-between h-full w-full absolute top-0 left-0 px-3 transition-opacity duration-300 ${expanded ? 'opacity-0 pointer-events-none' : 'opacity-100 delay-100'}`}>
         <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 shadow-md">
-          <img 
+          <TrackImage 
             src={currentTrack.thumbnail} 
             alt="cover" 
             className={`w-full h-full object-cover ${isPlaying ? 'animate-[spin_4s_linear_infinite]' : ''}`}
@@ -67,7 +68,7 @@ export default function DynamicIsland() {
       <div className={`flex flex-col h-full w-full transition-opacity duration-300 ${expanded ? 'opacity-100 delay-200' : 'opacity-0 pointer-events-none absolute'}`}>
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-full overflow-hidden shadow-lg border-2 border-white/20">
-            <img 
+            <TrackImage 
               src={currentTrack.thumbnail} 
               alt="cover" 
               className={`w-full h-full object-cover ${isPlaying ? 'animate-[spin_4s_linear_infinite]' : ''}`}

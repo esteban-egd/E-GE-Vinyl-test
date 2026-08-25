@@ -1,29 +1,79 @@
 /**
  * Vercel Serverless Function: /api/stream.js
- * Résout et proxyfie les flux audio YouTube complets en contournant CORS pour la production Vercel.
+ * Résolution et proxying haute résilience pour flux audio YouTube complets en production.
  */
 
-const PIPED_INSTANCES = [
-  'https://pipedapi.kavin.rocks',
-  'https://api.piped.privacydev.net',
-  'https://pipedapi.mha.fi',
-  'https://pipedapi.adminforge.de',
-  'https://piped-api.lunar.icu'
-];
-
+// Catalogue élargi d'instances Invidious publiques & fiables
 const INVIDIOUS_INSTANCES = [
   'https://invidious.nerdvpn.de',
   'https://inv.tux.pizza',
   'https://invidious.jing.rocks',
-  'https://invidious.privacyredirect.com'
+  'https://invidious.privacyredirect.com',
+  'https://invidious.drgns.space',
+  'https://yt.artemislena.eu',
+  'https://invidious.projectsegfau.lt',
+  'https://invidious.flokinet.to'
 ];
 
+// Catalogue élargi d'instances Piped publiques
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://api.piped.privacydev.net',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.mha.fi',
+  'https://piped-api.lunar.icu',
+  'https://pipedapi.colins.link'
+];
+
+// Instances Cobalt alternatives
+const COBALT_INSTANCES = [
+  'https://api.cobalt.tools/',
+  'https://co.wuk.sh/api/json'
+];
+
+/**
+ * Extrait le meilleur flux audio selon le bitrate (le plus élevé possible)
+ */
+function extractBestAudioFromInvidious(data) {
+  const formats = [...(data.adaptiveFormats || []), ...(data.formatStreams || [])];
+  const audioFormats = formats.filter(f => 
+    (f.type && f.type.includes('audio')) || 
+    (f.mimeType && f.mimeType.includes('audio')) ||
+    (f.audioQuality && !f.videoOnly)
+  );
+
+  if (audioFormats.length === 0) return null;
+
+  // Tri par bitrate descendant (priorité au débit max)
+  audioFormats.sort((a, b) => {
+    const bitA = parseInt(a.bitrate || a.audioSampleRate || 0, 10);
+    const bitB = parseInt(b.bitrate || b.audioSampleRate || 0, 10);
+    return bitB - bitA;
+  });
+
+  return audioFormats[0]?.url || null;
+}
+
+/**
+ * Extrait le meilleur flux audio Piped selon le bitrate
+ */
+function extractBestAudioFromPiped(data) {
+  const streams = data.audioStreams || [];
+  if (streams.length === 0) return null;
+
+  // Tri par bitrate descendant
+  streams.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+
+  return streams[0]?.url || null;
+}
+
 export default async function handler(req, res) {
-  // En-têtes CORS universels
+  // 1. En-têtes CORS stricts et universels
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization, Accept');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+  res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -76,88 +126,94 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Paramètre id ou videoId manquant' });
   }
 
-  // Mode 2 : Résolution du flux audio YouTube complet
-  let audioStreamUrl = null;
+  let bestAudioUrl = null;
 
-  // 1. Essai Cobalt API
-  try {
-    const cobaltRes = await fetch('https://api.cobalt.tools/', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        url: `https://www.youtube.com/watch?v=${videoId}`,
-        downloadMode: 'audio',
-        audioFormat: 'mp3'
-      }),
-      signal: AbortSignal.timeout(4000)
-    });
-
-    if (cobaltRes.ok) {
-      const data = await cobaltRes.json();
-      if (data?.url) {
-        audioStreamUrl = data.url.replace('http://', 'https://');
+  // 2. Stratégie combinée A : Invidious Instances (souvent moins bloquées que Piped sur cloud Vercel)
+  for (const inst of INVIDIOUS_INSTANCES) {
+    try {
+      const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+        signal: AbortSignal.timeout(3200),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; LyraMusic/1.0; +https://lyramusic.app)'
+        }
+      });
+      if (invRes.ok) {
+        const data = await invRes.json();
+        const found = extractBestAudioFromInvidious(data);
+        if (found) {
+          bestAudioUrl = found.replace('http://', 'https://');
+          break;
+        }
       }
+    } catch (_) {
+      // Instance suivante
     }
-  } catch (e) {
-    // Ignorer et passer aux instances suivantes
   }
 
-  // 2. Essai Piped API (Côté serveur sans restriction CORS navigateur)
-  if (!audioStreamUrl) {
+  // 3. Stratégie combinée B : Piped Instances avec extraction du bitrate maximum
+  if (!bestAudioUrl) {
     for (const inst of PIPED_INSTANCES) {
       try {
         const pipedRes = await fetch(`${inst}/streams/${videoId}`, {
-          signal: AbortSignal.timeout(3500)
+          signal: AbortSignal.timeout(3200),
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; LyraMusic/1.0; +https://lyramusic.app)'
+          }
         });
         if (pipedRes.ok) {
           const data = await pipedRes.json();
-          const streams = data.audioStreams || [];
-          const best = streams.find(s => s.format === 'M4A' || s.mimeType?.includes('audio')) || streams[0];
-          if (best?.url) {
-            audioStreamUrl = best.url.replace('http://', 'https://');
+          const found = extractBestAudioFromPiped(data);
+          if (found) {
+            bestAudioUrl = found.replace('http://', 'https://');
             break;
           }
         }
-      } catch (e) {}
+      } catch (_) {
+        // Instance suivante
+      }
     }
   }
 
-  // 3. Essai Invidious API
-  if (!audioStreamUrl) {
-    for (const inst of INVIDIOUS_INSTANCES) {
+  // 4. Stratégie combinée C : Cobalt API
+  if (!bestAudioUrl) {
+    for (const cob of COBALT_INSTANCES) {
       try {
-        const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
-          signal: AbortSignal.timeout(3500)
+        const cobaltRes = await fetch(cob, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            downloadMode: 'audio',
+            audioFormat: 'mp3',
+            audioBitrate: '320'
+          }),
+          signal: AbortSignal.timeout(4000)
         });
-        if (invRes.ok) {
-          const data = await invRes.json();
-          const formats = data.adaptiveFormats || [];
-          const best = formats.find(f => f.type?.includes('audio') || f.mimeType?.includes('audio'));
-          if (best?.url) {
-            audioStreamUrl = best.url.replace('http://', 'https://');
+
+        if (cobaltRes.ok) {
+          const data = await cobaltRes.json();
+          if (data?.url) {
+            bestAudioUrl = data.url.replace('http://', 'https://');
             break;
           }
         }
-      } catch (e) {}
+      } catch (_) {}
     }
   }
 
-  // 4. Si un flux a été trouvé
-  if (audioStreamUrl) {
-    // Si l'utilisateur demande une redirection directe pour la balise <audio>
+  // 5. Réponse JSON propre contenant le flux audio de haute qualité
+  if (bestAudioUrl) {
     if (req.query.redirect === 'true') {
-      return res.redirect(audioStreamUrl);
+      return res.redirect(bestAudioUrl);
     }
 
     return res.status(200).json({
-      success: true,
+      url: bestAudioUrl,
       videoId,
-      url: audioStreamUrl,
-      // URL proxyfiée pour éviter les éventuelles restrictions de referer
-      proxiedUrl: `/api/stream?url=${encodeURIComponent(audioStreamUrl)}`
+      proxiedUrl: `/api/stream?url=${encodeURIComponent(bestAudioUrl)}`
     });
   }
 

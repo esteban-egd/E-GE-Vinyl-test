@@ -8,6 +8,7 @@ import { useTheme } from '../context/ThemeContext';
 import { getArtistDetails, getMainArtistName, getAlbumTracks } from '../services/musicDataService';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import AddToPlaylistModal from '../components/common/AddToPlaylistModal';
+import TrackImage from '../components/common/TrackImage';
 import { 
   Play, 
   Pause,
@@ -424,12 +425,13 @@ export default function ArtistPage() {
 
                       {/* Title & Cover */}
                       <div className="col-span-7 md:col-span-6 flex items-center gap-3 min-w-0 pr-2">
-                        <img 
-                          src={track.thumbnail} 
-                          alt={track.title} 
-                          className="w-11 h-11 rounded-lg object-cover shrink-0 shadow-sm border"
-                          style={{ borderColor: isCurrent ? `${currentTheme?.primary || '#1ED760'}50` : 'rgba(255,255,255,0.05)' }}
-                        />
+                        <div className="w-11 h-11 rounded-lg overflow-hidden shrink-0 shadow-sm border" style={{ borderColor: isCurrent ? `${currentTheme?.primary || '#1ED760'}50` : 'rgba(255,255,255,0.05)' }}>
+                          <TrackImage 
+                            src={track.thumbnail} 
+                            alt={track.title} 
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
                         <div className="min-w-0">
                           <p className="font-semibold text-sm truncate group-hover:text-white" style={{ color: isCurrent ? currentTheme?.primary : '#f3f4f6' }}>
                             {track.title}
@@ -604,12 +606,13 @@ export default function ArtistPage() {
 
                         {/* Titre et artiste */}
                         <div className="col-span-7 md:col-span-8 flex items-center gap-3 min-w-0 pr-2">
-                          <img
-                            src={track.thumbnail || selectedAlbum.artwork}
-                            alt={track.title}
-                            className="w-10 h-10 rounded-lg object-cover shrink-0 shadow-sm border"
-                            style={{ borderColor: isCurrent ? `${currentTheme?.primary || '#1ED760'}50` : 'rgba(255,255,255,0.05)' }}
-                          />
+                          <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 shadow-sm border" style={{ borderColor: isCurrent ? `${currentTheme?.primary || '#1ED760'}50` : 'rgba(255,255,255,0.05)' }}>
+                            <TrackImage
+                              src={track.thumbnail || selectedAlbum.artwork}
+                              alt={track.title}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
                           <div className="min-w-0">
                             <p className="font-semibold text-sm truncate group-hover:text-white" style={{ color: isCurrent ? currentTheme?.primary : '#f3f4f6' }}>
                               {track.title}

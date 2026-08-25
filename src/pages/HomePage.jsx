@@ -10,6 +10,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import AddToPlaylistModal from '../components/common/AddToPlaylistModal';
+import TrackImage from '../components/common/TrackImage';
 import { 
   Disc, 
   Sparkles, 
@@ -121,7 +122,7 @@ export default function HomePage() {
               >
                 <div>
                   <div className="relative aspect-video w-full rounded-xl overflow-hidden mb-3 bg-[#222]">
-                    <img src={track.thumbnail} alt={track.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <TrackImage src={track.thumbnail} alt={track.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                     <div className="absolute top-2 left-2">
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500 text-black shadow-sm font-mono">
                         {track.year || '2024'}
@@ -258,7 +259,7 @@ export default function HomePage() {
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-sm bg-[#222]">
-                    <img src={track.thumbnail} alt={track.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    <TrackImage src={track.thumbnail} alt={track.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                       <Play size={16} fill="currentColor" className="text-white ml-0.5" />
                     </div>

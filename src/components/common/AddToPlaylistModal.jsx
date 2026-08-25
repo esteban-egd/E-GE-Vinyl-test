@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { usePlaylists } from '../../hooks/usePlaylists';
 import { X, Plus, ListMusic, Check, Sparkles } from 'lucide-react';
+import TrackImage from './TrackImage';
 
 export default function AddToPlaylistModal({ track, isOpen, onClose }) {
   const { playlists, createPlaylist, addTrackToPlaylist } = usePlaylists();
@@ -75,7 +76,9 @@ export default function AddToPlaylistModal({ track, isOpen, onClose }) {
 
         {/* Selected Track Preview */}
         <div className="flex items-center gap-3 bg-white/5 p-2.5 rounded-xl border border-white/5">
-          <img src={track.thumbnail} alt={track.title} className="w-10 h-10 rounded-md object-cover" />
+          <div className="w-10 h-10 rounded-md overflow-hidden shrink-0">
+            <TrackImage src={track.thumbnail} alt={track.title} className="w-full h-full object-cover" />
+          </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-white truncate">{track.title}</p>
             <p className="text-[11px] text-gray-400 truncate">{track.artist}</p>

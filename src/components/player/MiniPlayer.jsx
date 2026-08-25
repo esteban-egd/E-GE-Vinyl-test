@@ -2,6 +2,7 @@ import { useAudio } from '../../context/AudioContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Play, Pause, SkipForward } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import TrackImage from '../common/TrackImage';
 
 export default function MiniPlayer() {
   const { currentTrack, isPlaying, togglePlayPause, playNext, isLoading } = useAudio();
@@ -34,7 +35,7 @@ export default function MiniPlayer() {
         {/* Thumbnail */}
         <div className="w-12 h-12 shrink-0 rounded-md overflow-hidden relative z-10">
           {currentTrack.thumbnail ? (
-             <img src={currentTrack.thumbnail} alt={currentTrack.title} className="w-full h-full object-cover" />
+             <TrackImage src={currentTrack.thumbnail} alt={currentTrack.title} className="w-full h-full object-cover" />
           ) : (
              <div className="w-full h-full bg-[#222] flex items-center justify-center" />
           )}

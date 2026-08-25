@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import AddToPlaylistModal from '../components/common/AddToPlaylistModal';
+import TrackImage from '../components/common/TrackImage';
 import { 
   Play, 
   Shuffle,
@@ -402,7 +403,7 @@ function PlaylistView({ playlist, onBack }) {
                   onClick={() => handleSelectTrackCover(t.thumbnail)}
                   className="aspect-square rounded-xl overflow-hidden cursor-pointer border-2 border-transparent hover:border-amber-500 transition-all relative group"
                 >
-                  <img src={t.thumbnail} alt={t.title} className="w-full h-full object-cover" />
+                  <TrackImage src={t.thumbnail} alt={t.title} className="w-full h-full object-cover" />
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-amber-400">
                     <Check size={20} />
                   </div>
@@ -563,7 +564,7 @@ function TrackItem({ track, currentTrack, onPlay, onAddToPlaylist, actionIcon, o
         }`}
         onClick={onPlay}
       >
-        <img src={track.thumbnail} alt={track.title} className="w-full h-full object-cover" />
+        <TrackImage src={track.thumbnail} alt={track.title} className="w-full h-full object-cover" />
         <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity ${
           isThisActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
         }`}>

@@ -1,4 +1,5 @@
 import { useAudio } from '../../context/AudioContext';
+import TrackImage from '../common/TrackImage';
 
 export default function VinylDisc({ thumbnail, speed = 33, rotationAngle = 0, isDragging = false }) {
   const { isPlaying, isLoading } = useAudio();
@@ -81,9 +82,10 @@ export default function VinylDisc({ thumbnail, speed = 33, rotationAngle = 0, is
         >
           {/* Pochette de l'album en fond avec floutage chic */}
           {thumbnail ? (
-            <div 
-              className="absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: `url(${thumbnail})` }}
+            <TrackImage 
+              src={thumbnail}
+              alt="Pochette Vinyle"
+              className="absolute inset-0 w-full h-full object-cover"
             />
           ) : (
             <div className="absolute inset-0 bg-stone-950 opacity-40" />

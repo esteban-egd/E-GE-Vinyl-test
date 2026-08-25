@@ -1,6 +1,7 @@
 import { useAudio } from '../../context/AudioContext';
 import { useLikes } from '../../hooks/useLikes';
 import { ListMusic, Trash2, X, Music, Heart } from 'lucide-react';
+import TrackImage from '../common/TrackImage';
 
 export default function QueueDrawer({ isOpen, onClose }) {
   const { queue, play, currentTrack, isCurrentTrack, removeFromQueue, clearQueue } = useAudio();
@@ -48,11 +49,13 @@ export default function QueueDrawer({ isOpen, onClose }) {
         {/* Titre actuel */}
         {currentTrack && (
           <div className="p-3.5 rounded-2xl bg-amber-600/15 border border-amber-600/40 mb-4 flex items-center gap-3">
-            <img 
-              src={currentTrack.thumbnail} 
-              alt={currentTrack.title} 
-              className="w-12 h-12 rounded-xl object-cover shadow-sm"
-            />
+            <div className="w-12 h-12 rounded-xl overflow-hidden shadow-sm shrink-0">
+              <TrackImage 
+                src={currentTrack.thumbnail} 
+                alt={currentTrack.title} 
+                className="w-full h-full object-cover"
+              />
+            </div>
             <div className="flex-1 min-w-0">
               <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider block">
                 En cours de lecture
@@ -87,11 +90,13 @@ export default function QueueDrawer({ isOpen, onClose }) {
                   {idx + 1}
                 </span>
 
-                <img 
-                  src={track.thumbnail} 
-                  alt={track.title} 
-                  className={`w-10 h-10 rounded-lg object-cover shadow-sm shrink-0 border ${isPlayingThis ? 'border-amber-500/50' : 'border-white/5'}`}
-                />
+                <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/5">
+                  <TrackImage 
+                    src={track.thumbnail} 
+                    alt={track.title} 
+                    className="w-full h-full object-cover"
+                  />
+                </div>
 
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-semibold truncate ${isPlayingThis ? 'text-amber-400 font-bold' : 'text-white'}`}>
