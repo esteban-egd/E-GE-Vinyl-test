@@ -3,7 +3,7 @@ import { useAudio } from '../../context/AudioContext';
 
 /**
  * YouTubeIframeEngine
- * Moteur YouTube Iframe invisible pour la lecture Web instantanée.
+ * Lecteur YouTube invisible mais valide pour l'API YouTube (contourne le blocage 1px/opacity).
  */
 export default function YouTubeIframe() {
   const { setIframePlayer, onIframeStateChange, onIframeError } = useAudio();
@@ -20,8 +20,8 @@ export default function YouTubeIframe() {
 
       try {
         new window.YT.Player(containerRef.current, {
-          height: '100%',
-          width: '100%',
+          height: '200',
+          width: '200',
           videoId: '',
           playerVars: {
             autoplay: 1,
@@ -32,6 +32,8 @@ export default function YouTubeIframe() {
             playsinline: 1,
             rel: 0,
             iv_load_policy: 3,
+            enablejsapi: 1,
+            origin: window.location.origin,
           },
           events: {
             onReady: (event) => {
@@ -102,17 +104,16 @@ export default function YouTubeIframe() {
       aria-hidden="true"
       style={{
         position: 'fixed',
-        bottom: '0',
-        right: '0',
-        width: '1px',
-        height: '1px',
-        opacity: '0.001',
+        top: '-9999px',
+        left: '-9999px',
+        width: '200px',
+        height: '200px',
         pointerEvents: 'none',
-        zIndex: -1,
-        overflow: 'hidden',
+        zIndex: -9999,
+        visibility: 'visible',
       }}
     >
-      <div ref={containerRef} id="yt-hidden-engine" className="w-full h-full" />
+      <div ref={containerRef} id="yt-hidden-engine" style={{ width: '100%', height: '100%' }} />
     </div>
   );
 }
