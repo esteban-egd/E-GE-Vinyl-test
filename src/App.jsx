@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
@@ -19,6 +20,7 @@ import LibraryPage from './pages/LibraryPage';
 import SettingsPage from './pages/SettingsPage';
 import VinylPlayer from './components/player/VinylPlayer';
 import LandingPage from './pages/LandingPage';
+import PresentationPage from './pages/PresentationPage';
 import OfflineNotice from './components/common/OfflineNotice';
 import OfflineSyncBar from './components/common/OfflineSyncBar';
 
@@ -26,14 +28,33 @@ function AppContent() {
   const { user, loading } = useAuth();
   const { currentTrack } = useAudio();
   const location = useLocation();
+  const [showLoginOnWeb, setShowLoginOnWeb] = useState(false);
+
+  // Auto-detection of Native Platform Target (Electron / Capacitor)
+  const isNativeApp = import.meta.env.VITE_IS_APP === 'true' || 
+                      !!window.ipcRenderer || 
+                      !!window.Capacitor || 
+                      !!window.android || 
+                      (window.process && window.process.versions && !!window.process.versions.electron);
 
   if (loading) return <div className="h-dvh flex items-center justify-center bg-[#0d0c0b] text-[#e6dfd5]">Chargement...</div>;
-  if (!user) return (
-    <>
-      <OfflineNotice />
-      <LandingPage />
-    </>
-  );
+  if (!user) {
+    if (isNativeApp || showLoginOnWeb) {
+      return (
+        <>
+          <OfflineNotice />
+          <LandingPage onBackToPresentation={!isNativeApp ? () => setShowLoginOnWeb(false) : null} />
+        </>
+      );
+    } else {
+      return (
+        <>
+          <OfflineNotice />
+          <PresentationPage onEnterWebPlayer={() => setShowLoginOnWeb(true)} />
+        </>
+      );
+    }
+  }
 
   const hasActiveTrack = !!currentTrack && location.pathname !== '/player';
   const paddingBottomClass = hasActiveTrack 
