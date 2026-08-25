@@ -17,10 +17,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
-      - name: Force Install Dependencies (with optional binary bindings)
-        run: npm install --include=optional
+      - name: Install Dependencies with Windows Bindings
+        run: npm install --os=win32 --cpu=x64
 
       - name: Build Web Assets
         env:
@@ -49,10 +49,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Setup Java JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
           java-version: '17'
@@ -60,18 +60,18 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Dependencies & Capacitor CLI
-        run: |
-          npm install --include=optional
-          npm install @capacitor/cli @capacitor/core @capacitor/android
+      - name: Install Dependencies
+        run: npm install
 
       - name: Build Web Assets for Capacitor
         env:
           VITE_IS_APP: "true"
         run: npm run build
 
-      - name: Add Android Platform if missing
-        run: npx cap add android || true
+      - name: Initialize Capacitor Android if missing
+        run: |
+          npx cap init "E-GE Vinyl" "com.ege.vinyl" --web-dir dist || true
+          npx cap add android || true
 
       - name: Sync Capacitor Android Project
         run: npx cap sync android
@@ -86,7 +86,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Android-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk
 
   create-release:
     name: Create GitHub Release
