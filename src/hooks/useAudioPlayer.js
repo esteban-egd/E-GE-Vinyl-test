@@ -639,8 +639,18 @@ export function useAudioPlayer() {
       if (iframePlayerRef.current && typeof iframePlayerRef.current.loadVideoById === 'function') {
         try {
           iframePlayerRef.current.loadVideoById(trackMeta.videoId, 0);
-          iframePlayerRef.current.playVideo();
           iframePlayerRef.current.setVolume(Math.round(volume * 100));
+          const playPromise = iframePlayerRef.current.playVideo();
+          if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch((err) => {
+              console.warn('[AudioEngine] Autoplay bloqué par le navigateur:', err);
+              toast('Cliquez sur le lecteur pour démarrer la lecture audio', {
+                id: 'autoplay-interaction-prompt',
+                icon: '▶️',
+                duration: 4000
+              });
+            });
+          }
           setIsPlaying(true);
           setIsLoading(false);
         } catch (err) {
