@@ -15,10 +15,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -39,7 +39,7 @@ jobs:
         run: npx electron-builder --windows nsis:x64 --publish never
 
       - name: Upload Windows Executable (.exe)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Windows-Executable
           path: dist_electron/*.exe # ou dist/*.exe selon ton dossier d'export
@@ -52,10 +52,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -86,7 +86,7 @@ jobs:
           ./gradlew assembleDebug
 
       - name: Upload Android APK (.apk)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Android-APK
           path: android/app/build/outputs/apk/debug/*.apk
@@ -101,13 +101,13 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download Windows Executable
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: Windows-Executable
           path: release-assets/
 
       - name: Download Android APK
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: Android-APK
           path: release-assets/
