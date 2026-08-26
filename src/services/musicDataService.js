@@ -9,6 +9,24 @@ export { extractYouTubeId };
 
 const memoryCache = new Map();
 
+// Décode de manière récursive et sécurisée les chaînes qui peuvent être double ou triple url-encodées
+export function safeDecodeURI(str) {
+  if (!str || typeof str !== 'string') return '';
+  let decoded = str;
+  try {
+    let prev;
+    let limit = 0;
+    while (decoded.includes('%') && prev !== decoded && limit < 4) {
+      prev = decoded;
+      decoded = decodeURIComponent(decoded);
+      limit++;
+    }
+  } catch (e) {
+    // Garder la dernière version décodée avec succès
+  }
+  return decoded;
+}
+
 // Vérifie si une URL d'artwork ou d'avatar est valide et n'est pas un placeholder vide / silhouette Deezer
 export function isValidArtwork(url) {
   if (!url || typeof url !== 'string') return false;
@@ -57,9 +75,13 @@ export function getMainArtistName(artistName) {
 // Normalise un nom d'artiste pour éviter les doublons ("Lynyrd Skynyrd" vs "Lynyrd Skynyrd " vs "The Lynyrd Skynyrd")
 export function normalizeArtistKey(name) {
   if (!name || typeof name !== 'string') return '';
-  const mainName = getMainArtistName(name);
+  const decoded = safeDecodeURI(name);
+  const mainName = getMainArtistName(decoded);
   return mainName
     .toLowerCase()
+    .replace(/œ/g, 'oe')
+    .replace(/æ/g, 'ae')
+    .replace(/ß/g, 'ss')
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\(\[\{].*?[\)\]\}]/g, '') // Supprime les parenthèses (feat...), (Live)
@@ -72,11 +94,12 @@ export function normalizeArtistKey(name) {
 export function isArtistMatch(candidate, artistName) {
   if (!candidate || !artistName) return false;
 
-  const targetMain = getMainArtistName(artistName);
+  const targetMain = getMainArtistName(safeDecodeURI(artistName));
   const targetKey = normalizeArtistKey(targetMain);
   if (!targetKey) return false;
 
-  const candParts = candidate
+  const decodedCand = safeDecodeURI(candidate);
+  const candParts = decodedCand
     .split(/\s+(?:ft\.?|feat\.?|featuring|with|x|&|vs\.?)\s+|,|\(/i)
     .map(p => p.replace(/[\)\}\]]/g, '').trim())
     .filter(Boolean);
@@ -920,7 +943,7 @@ export async function fetchTheAudioDbArtistVisuals(artistName) {
  */
 export async function getArtistDetails(artistName) {
   if (!artistName) return null;
-  const targetMainName = getMainArtistName(artistName);
+  const targetMainName = getMainArtistName(safeDecodeURI(artistName));
   const cleanName = targetMainName.trim();
   const cacheKey = `artist_details_v6_${cleanName.toLowerCase()}`;
   if (memoryCache.has(cacheKey)) {
@@ -990,28 +1013,22 @@ export async function getArtistDetails(artistName) {
       } catch (_) {}
     }
 
-    // 3. Requêtes iTunes (avec et sans accents, SANS attribute=artistTerm qui bloque)
-    const itunesTracksPromise1 = fetch(
+    // 3. Requêtes iTunes sérialisées / limitées pour réduire la concurrence simultanée (Max 2 requêtes en même temps)
+    const tracksData1 = await fetch(
       `https://itunes.apple.com/search?term=${encodeURIComponent(cleanName)}&entity=song&limit=50`,
       { signal: AbortSignal.timeout(4000) }
     ).then(res => res.json()).catch(() => ({ results: [] }));
 
-    const itunesTracksPromise2 = cleanNorm !== cleanName.toLowerCase()
-      ? fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanNorm)}&entity=song&limit=50`, { signal: AbortSignal.timeout(4000) }).then(res => res.json()).catch(() => ({ results: [] }))
-      : Promise.resolve({ results: [] });
+    const tracksData2 = cleanNorm !== cleanName.toLowerCase()
+      ? await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanNorm)}&entity=song&limit=50`, { signal: AbortSignal.timeout(4000) }).then(res => res.json()).catch(() => ({ results: [] }))
+      : { results: [] };
 
-    const itunesAlbumsPromise = fetch(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(cleanName)}&entity=album&limit=30`,
-      { signal: AbortSignal.timeout(4000) }
-    ).then(res => res.json()).catch(() => ({ results: [] }));
-
-    const officialVisualsPromise = fetchTheAudioDbArtistVisuals(cleanName).catch(() => null);
-
-    const [tracksData1, tracksData2, albumsData, officialVisuals] = await Promise.all([
-      itunesTracksPromise1,
-      itunesTracksPromise2,
-      itunesAlbumsPromise,
-      officialVisualsPromise
+    const [albumsData, officialVisuals] = await Promise.all([
+      fetch(
+        `https://itunes.apple.com/search?term=${encodeURIComponent(cleanName)}&entity=album&limit=30`,
+        { signal: AbortSignal.timeout(4000) }
+      ).then(res => res.json()).catch(() => ({ results: [] })),
+      fetchTheAudioDbArtistVisuals(cleanName).catch(() => null)
     ]);
 
     const allItunesTracks = [...(tracksData1.results || []), ...(tracksData2.results || [])];

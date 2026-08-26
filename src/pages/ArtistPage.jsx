@@ -5,7 +5,7 @@ import { useLikes } from '../hooks/useLikes';
 import { usePlaylists } from '../hooks/usePlaylists';
 import { useFollowedArtists } from '../hooks/useFollowedArtists';
 import { useTheme } from '../context/ThemeContext';
-import { getArtistDetails, getMainArtistName, getAlbumTracks } from '../services/musicDataService';
+import { getArtistDetails, getMainArtistName, getAlbumTracks, safeDecodeURI } from '../services/musicDataService';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import AddToPlaylistModal from '../components/common/AddToPlaylistModal';
 import TrackImage from '../components/common/TrackImage';
@@ -26,7 +26,7 @@ import {
 
 export default function ArtistPage() {
   const { artistName } = useParams();
-  const rawArtist = decodeURIComponent(artistName || '');
+  const rawArtist = safeDecodeURI(artistName || '');
   const decodedArtistName = getMainArtistName(rawArtist);
   const navigate = useNavigate();
   const { search } = useLocation();

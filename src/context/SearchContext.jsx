@@ -207,10 +207,10 @@ export function SearchProvider({ children }) {
     }
 
     setIsSearching(true);
-    // Debounce réactif 250ms
+    // Debounce réactif 300ms
     searchTimeoutRef.current = setTimeout(() => {
       performSearch(newQuery);
-    }, 250);
+    }, 300);
   }, [performSearch]);
 
   // Déclenchement instantané (ex: appui sur Entrée ou clic sur tag/suggestion)

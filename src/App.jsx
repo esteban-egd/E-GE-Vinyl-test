@@ -34,7 +34,7 @@ function AppContent() {
 
   useEffect(() => {
     if (user && !prevUserRef.current) {
-      navigate('/player');
+      navigate('/');
     }
     prevUserRef.current = user;
   }, [user, navigate]);

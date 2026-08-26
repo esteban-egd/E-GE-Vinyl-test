@@ -7,6 +7,10 @@
   "build": {
     "appId": "com.ege.vinyl",
     "productName": "E-GE Vinyl",
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/hash-wasm/**"
+    ],
     "files": [
       "dist/**/*",
       "Lyra-Source-Code/**/*",
@@ -14,6 +18,10 @@
     ],
     "directories": {
       "output": "dist_electron"
+    },
+    "win": {
+      "certificateFile": "cert.pfx",
+      "certificatePassword": "vinylstore123"
     }
   },
   "scripts": {
@@ -32,6 +40,7 @@
     "dexie": "^4.4.5",
     "electron-store": "^11.0.2",
     "express": "^5.2.1",
+    "hash-wasm": "^4.12.0",
     "idb": "^8.0.3",
     "lucide-react": "^1.31.0",
     "motion": "^13.1.1",

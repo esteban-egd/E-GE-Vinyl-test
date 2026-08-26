@@ -4,8 +4,15 @@ import App from './App.jsx'
 import { ErrorBoundary } from './components/common/ErrorBoundary.jsx'
 import './index.css'
 
-// Register Service Worker in production only to avoid stale caching in dev/preview
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+// Auto-detection of Native Platform Target (Electron / Capacitor)
+const isNativeApp = import.meta.env.VITE_IS_APP === 'true' || 
+                    !!window.ipcRenderer || 
+                    !!window.Capacitor || 
+                    !!window.android || 
+                    (window.process && window.process.versions && !!window.process.versions.electron);
+
+// Register Service Worker in production only to avoid stale caching in dev/preview, but disable on native targets
+if (import.meta.env.PROD && 'serviceWorker' in navigator && !isNativeApp) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
