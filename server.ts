@@ -298,7 +298,7 @@ async function startServer() {
     }
   });
 
-  // Proxy Innertube WEB_REMIX API (Lyra Music extraction)
+  // Proxy Innertube WEB_REMIX API (E-GE Vinyl extraction)
   app.post("/api/innertube-player", async (req, res) => {
     try {
       const { videoId } = req.body;

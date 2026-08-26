@@ -1,12 +1,12 @@
 {
-  "name": "lyra-desktop",
-  "description": "Lyra Music Desktop App",
+  "name": "e-ge-vinyl",
+  "description": "E-GE Vinyl Desktop App",
   "version": "1.0.21",
-  "homepage": "https://lyramusic.app",
-  "productName": "Lyra Music",
+  "homepage": "https://ege-vinyl.vercel.app",
+  "productName": "E-GE Vinyl",
   "author": {
-    "name": "Lyra",
-    "email": "support@lyramusic.app"
+    "name": "e-ge-vinyl",
+    "email": "support@ege-vinyl.vercel.app"
   },
   "main": "electron-build/electron-main.js",
   "dependencies": {

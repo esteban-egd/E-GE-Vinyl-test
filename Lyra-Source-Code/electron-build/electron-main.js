@@ -72,7 +72,7 @@ var import_electron_store, import_electron2, stores, guard, filenamePrefix, file
 var init_keyValueStorage = __esm({
   "../../StreamingCore-Client/src/adapters/electron-main/keyValueStorage/index.ts"() {
     "use strict";
-    import_electron_store = __toESM(require("electron-store"));
+    import_electron_store = null;
     import_electron2 = require("electron");
     init_adapterRegistry();
     stores = /* @__PURE__ */ new Map();
@@ -174,6 +174,7 @@ var init_keyValueStorage = __esm({
     };
     initKeyValueStorageAdapter = async (ctx) => {
       if (!guard.bind()) return;
+      import_electron_store = __toESM(await import("electron-store"));
       filenamePrefix = ctx?.legacyFilenamePrefix ?? "";
       import_electron2.app?.on?.("before-quit", flush);
       import_electron2.app?.on?.("will-quit", flush);
@@ -11449,9 +11450,9 @@ var alreadyHandledFatal = false;
 var installed = false;
 var crashLogPath = () => {
   try {
-    return import_node_path.default.join(import_electron.app.getPath("userData"), "lyra-main-crash.log");
+    return import_node_path.default.join(import_electron.app.getPath("userData"), "e-ge-vinyl-main-crash.log");
   } catch {
-    return import_node_path.default.join(import_node_os.default.tmpdir(), "lyra-main-crash.log");
+    return import_node_path.default.join(import_node_os.default.tmpdir(), "e-ge-vinyl-main-crash.log");
   }
 };
 var persistCrash = (label, error) => {
@@ -11470,16 +11471,16 @@ ${detail}
 };
 var showFatalDialog = (error) => {
   const reason = error instanceof Error ? error.message : String(error);
-  const message = `Lyra could not start because a required component failed to load.
+  const message = `E-GE Vinyl could not start because a required component failed to load.
 
-This usually means the last update did not install completely. Please reinstall Lyra from lyramusic.app \u2014 your library and settings are kept.
+This usually means the last update did not install completely. Please reinstall E-GE Vinyl from ege-vinyl.vercel.app \u2014 your library and settings are kept.
 
 Technical detail: ${reason}
 
 A diagnostic log was saved to:
 ` + crashLogPath();
   try {
-    import_electron.dialog.showErrorBox("Lyra failed to start", message);
+    import_electron.dialog.showErrorBox("E-GE Vinyl failed to start", message);
   } catch (dialogErr) {
     console.error("[crash-guard] could not show fatal dialog", dialogErr);
   }
@@ -11529,10 +11530,10 @@ var createTray2 = () => {
   const icon = import_electron18.nativeImage.createFromPath(import_node_path2.default.join(iconDir(), "logo.png"));
   if (process.platform === "darwin") icon.setTemplateImage(true);
   tray3 = new import_electron18.Tray(icon);
-  tray3.setToolTip("Lyra Music");
+  tray3.setToolTip("E-GE Vinyl");
   tray3.setContextMenu(
     import_electron18.Menu.buildFromTemplate([
-      { label: "Open Lyra", click: () => showMainWindow() },
+      { label: "Open E-GE Vinyl", click: () => showMainWindow() },
       { type: "separator" },
       { label: "Quit", click: () => import_electron18.app.quit() }
     ])
@@ -11568,9 +11569,9 @@ var import_electron_main = __toESM(require_electron_main());
 function bindEvents() {
   (0, import_electron_main.bindDesktopAppEvents)({
     authWindow: {
-      title: "Sign in to Lyra",
+      title: "Sign in to E-GE Vinyl",
       backgroundColor: "#121116",
-      partition: "persist:lyra-auth"
+      partition: "persist:ege-vinyl-auth"
     },
     autoUpdater: import_electron_updater.autoUpdater,
     getMachineId: import_node_machine_id.machineId,
@@ -11619,14 +11620,14 @@ if (process?.platform === "win32") platform = "windows";
 else if (process?.platform === "darwin") platform = "macOS";
 if (process.platform === "win32") {
   try {
-    import_electron20.app.setAppUserModelId("com.musicapp.lyra");
+    import_electron20.app.setAppUserModelId("com.ege.vinyl");
   } catch {
   }
 }
 if (process.platform === "linux") {
-  import_electron20.app.commandLine.appendSwitch("class", "lyra-desktop");
+  import_electron20.app.commandLine.appendSwitch("class", "ege-vinyl-desktop");
 }
-if (process.env.LYRA_DISABLE_HW_ACCEL === "1") {
+if (process.env.EGE_VINYL_DISABLE_HW_ACCEL === "1") {
   import_electron20.app.disableHardwareAcceleration();
 }
 import_electron20.app.commandLine.appendSwitch("disable-renderer-backgrounding");
@@ -11648,7 +11649,7 @@ if (!import_electron_is_dev.default) {
   (0, import_electron_unhandled.default)({ logger: () => {
   }, showDialog: false });
 }
-var PROTOCOL = "lyramusic";
+var PROTOCOL = "egevinyl";
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
     import_electron20.app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [import_path7.default.resolve(process.argv[1])]);
@@ -11711,7 +11712,7 @@ function createWindow() {
       }
     } : {},
     trafficLightPosition: { x: 16, y: 16 },
-    title: "Lyra Music",
+    title: "E-GE Vinyl",
     webPreferences: {
       webSecurity: false,
       devTools: true,
@@ -12173,7 +12174,7 @@ var import_electron21 = require("electron");
 var import_node_v8 = require("node:v8");
 var import_promises = require("node:fs/promises");
 var import_node_path3 = __toESM(require("node:path"));
-var APP_ID = "app.lyramusic.desktop";
+var APP_ID = "com.ege.vinyl.desktop";
 var STORAGE_KEY = "fcm";
 var storageFile = () => import_node_path3.default.join(import_electron21.app.getPath("userData"), "fcm-credentials.v8");
 var readStore = async () => {
@@ -12187,7 +12188,7 @@ var writeStore = async (store) => {
   await (0, import_promises.writeFile)(storageFile(), (0, import_node_v8.serialize)(store));
 };
 var diskStorage = new import_core.AsyncStorage(
-  "LyraFcmStorage",
+  "EgeVinylFcmStorage",
   async () => writeStore({}),
   async (key) => {
     const store = await readStore();
@@ -12333,11 +12334,11 @@ var initDesktopFcm = () => {
 // electron-main.ts
 installMainProcessCrashGuard();
 var DISCORD_CLIENT_ID = "1469310964800159836";
-var DISCORD_PRODUCT_NAME = "Lyra Music";
+var DISCORD_PRODUCT_NAME = "E-GE Vinyl";
 var discordRpc = require("discord-rpc");
 var initCoreAdapters = async () => {
   await (0, import_electron_main5.prepareAppForPlatform)({
-    keyValueStorage: { legacyFilenamePrefix: "lyra" },
+    keyValueStorage: { legacyFilenamePrefix: "ege-vinyl" },
     nosqlStorage: true,
     sqlStorage: true,
     crypto: true,
