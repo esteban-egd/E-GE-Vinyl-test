@@ -10621,12 +10621,15 @@ function createDesktopMain(opts) {
     }]);
   }
   if (!dev && installUnhandledRejectionTrap) {
-    try {
-      const unhandled2 = require("electron-unhandled");
-      unhandled2({ logger: () => {
-      }, showDialog: false });
-    } catch {
-    }
+    (async () => {
+      try {
+        const unhandled2 = (await import("electron-unhandled")).default;
+        unhandled2({ logger: () => {
+        }, showDialog: false });
+      } catch (e) {
+        console.error(e);
+      }
+    })();
   }
   for (const scheme of protocols) {
     if (process.defaultApp) {
@@ -11586,7 +11589,7 @@ function bindWindowEvents(win2) {
 var import_electron_main2 = __toESM(require_electron_main());
 var import_electron_main3 = __toESM(require_electron_main());
 var import_electron_main4 = __toESM(require_electron_main());
-var import_electron_unhandled = __toESM(require("electron-unhandled"));
+var import_electron_unhandled = null;
 var import_electron_context_menu = __toESM(require("electron-context-menu"));
 globalThis.__DEV__ = import_electron_is_dev.default;
 (() => {
@@ -11646,8 +11649,15 @@ if (!import_electron_is_dev.default) {
   }]);
 }
 if (!import_electron_is_dev.default) {
-  (0, import_electron_unhandled.default)({ logger: () => {
-  }, showDialog: false });
+  (async () => {
+    try {
+      const unhandled = (await import("electron-unhandled")).default;
+      unhandled({ logger: () => {
+      }, showDialog: false });
+    } catch (e) {
+      console.error(e);
+    }
+  })();
 }
 var PROTOCOL = "egevinyl";
 if (process.defaultApp) {

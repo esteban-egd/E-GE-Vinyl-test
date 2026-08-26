@@ -30,6 +30,8 @@ jobs:
       - name: Build Web Assets
         env:
           VITE_IS_APP: "true"
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
 
       - name: Build Electron App
@@ -76,6 +78,8 @@ jobs:
       - name: Build Web Assets for Capacitor
         env:
           VITE_IS_APP: "true"
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
 
       - name: Sync Capacitor Android Project
