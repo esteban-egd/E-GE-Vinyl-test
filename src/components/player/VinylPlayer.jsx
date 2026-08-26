@@ -36,7 +36,10 @@ export default function VinylPlayer() {
     toggleShuffle,
     repeat,
     toggleRepeat,
-    isLoading
+    isLoading,
+    queue,
+    queueIndex,
+    setQueueAndPlay
   } = useAudio();
 
   // Swipe detection refs
@@ -48,6 +51,7 @@ export default function VinylPlayer() {
   const { isDownloaded, downloadTrack, isDownloading, removeTrack } = useOffline();
   
   const [mobileTab, setMobileTab] = useState('platine'); // Keeps PC fallback working
+  const [pcTab, setPcTab] = useState('lyrics'); // 'lyrics' | 'queue'
   const [isLyricsModalOpen, setIsLyricsModalOpen] = useState(false);
   const canvasRef = useRef(null);
   const [speed, setSpeed] = useState(33); // 33 | 45 RPM
@@ -214,7 +218,7 @@ export default function VinylPlayer() {
   const trackDownloading = currentTrack ? isDownloading.has(currentTrack.videoId) : false;
 
   return (
-    <div className="fixed xl:relative top-16 xl:top-0 bottom-[72px] xl:bottom-0 left-0 right-0 w-full h-[calc(100dvh-136px)] xl:h-full flex flex-col items-center xl:justify-center p-2 sm:p-4 overflow-hidden z-30 bg-[var(--color-canvas)] xl:bg-transparent">
+    <div className="fixed lg:relative top-16 lg:top-0 bottom-[72px] lg:bottom-0 left-0 right-0 w-full h-[calc(100dvh-136px)] lg:h-full flex flex-col items-center lg:justify-center p-2 sm:p-4 overflow-hidden z-30 bg-[var(--color-canvas)] lg:bg-transparent">
       {/* Invisible Canvas for Aura extraction */}
       <canvas ref={canvasRef} width="1" height="1" className="hidden" />
 
@@ -228,10 +232,10 @@ export default function VinylPlayer() {
       />
 
       {/* 🖥️ VIEW FOR COMPUTER (PC / TABLET LARGE) */}
-      <div className="hidden xl:flex w-full flex-row items-stretch justify-center gap-10 max-w-[1400px] mx-auto z-10">
+      <div className="hidden lg:flex w-full flex-row items-stretch justify-center gap-8 2xl:gap-12 max-w-[1500px] mx-auto z-10">
         
         {/* --- PLATINE VINYLE LUXE SKEUOMORPHIQUE --- */}
-        <div className="relative w-full xl:max-w-xl xl:flex-shrink-0 bg-gradient-to-br from-[#3b2110] via-[#2a1408] to-[#1c0d05] rounded-xl p-5 sm:p-7 border-4 border-[#1c0d05] shadow-[0_25px_60px_rgba(40,20,10,0.65)] flex flex-col gap-6 font-sans">
+        <div className="relative w-full lg:max-w-[580px] 2xl:max-w-[680px] lg:flex-shrink-0 bg-gradient-to-br from-[#3b2110] via-[#2a1408] to-[#1c0d05] rounded-xl p-5 sm:p-7 border-4 border-[#1c0d05] shadow-[0_25px_60px_rgba(40,20,10,0.65)] flex flex-col gap-6 font-sans">
           
           {/* En-tête de la platine avec marquage et afficheur LCD */}
           <div className="flex justify-between items-center border-b border-[#301d12] pb-4">
@@ -424,10 +428,79 @@ export default function VinylPlayer() {
         </div>
 
         {/* Right Column: Lyrics & Controls */}
-        <div className="flex flex-col w-full xl:max-w-[450px] gap-4 z-20 xl:h-[650px]">
-          {/* Lyrics block takes up available space */}
-          <div className="flex-1 min-h-[300px] xl:min-h-0 bg-[var(--color-panel)] rounded-xl border border-[var(--color-sand)] shadow-sm overflow-hidden flex flex-col">
-            <LyricsView inline={true} />
+        <div className="flex flex-col w-full lg:max-w-[420px] 2xl:max-w-[480px] gap-4 z-20 lg:h-[650px]">
+          {/* Lyrics & Play Queue Tabs Block */}
+          <div className="flex-1 min-h-[300px] lg:min-h-0 bg-[var(--color-panel)] rounded-xl border border-[var(--color-sand)] shadow-sm overflow-hidden flex flex-col">
+            {/* Header Tabs to switch between Lyrics and Play Queue */}
+            <div className="flex border-b border-white/10 shrink-0 bg-black/25">
+              <button
+                onClick={() => setPcTab('lyrics')}
+                className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 ${
+                  pcTab === 'lyrics'
+                    ? 'text-[var(--color-brass)] border-[var(--color-brass)] bg-white/5'
+                    : 'text-gray-400 border-transparent hover:text-white'
+                }`}
+              >
+                Paroles
+              </button>
+              <button
+                onClick={() => setPcTab('queue')}
+                className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 ${
+                  pcTab === 'queue'
+                    ? 'text-[var(--color-brass)] border-[var(--color-brass)] bg-white/5'
+                    : 'text-gray-400 border-transparent hover:text-white'
+                }`}
+              >
+                File d'attente ({queue.length})
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-hidden relative flex flex-col">
+              {pcTab === 'lyrics' ? (
+                <LyricsView inline={true} />
+              ) : (
+                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2 scrollbar-none">
+                  {queue.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-500 py-12">
+                      <Disc className="animate-spin-slow mb-3 text-gray-600" size={32} />
+                      <p className="text-xs">File d'attente vide</p>
+                    </div>
+                  ) : (
+                    queue.map((track, idx) => {
+                      const isThisActive = idx === queueIndex;
+                      return (
+                        <div
+                          key={`${track.videoId || track.id}-${idx}`}
+                          onClick={() => setQueueAndPlay(queue, idx)}
+                          className={`flex items-center gap-3.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                            isThisActive
+                              ? 'bg-[var(--color-brass)]/10 border-[var(--color-brass)]/30 text-white'
+                              : 'bg-[#120f0a] hover:bg-[#1a160f] border-white/5 hover:border-white/10 text-gray-300'
+                          }`}
+                        >
+                          <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-white/10">
+                            <img src={track.thumbnail} alt={track.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-xs font-extrabold truncate ${isThisActive ? 'text-[var(--color-brass)]' : 'text-white'}`}>
+                              {track.title}
+                            </p>
+                            <p className="text-[10px] text-gray-400 truncate">
+                              {track.artist}
+                            </p>
+                          </div>
+                          {isThisActive && (
+                            <span className="text-[8px] bg-[var(--color-brass)] text-[#1c1917] font-black px-1.5 py-0.5 rounded uppercase font-mono tracking-wider">
+                              LECTURE
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Player Controls at the bottom */}
@@ -438,10 +511,10 @@ export default function VinylPlayer() {
       </div>
 
       {/* 📱 PORTRAIT MOBILE VIEW (TEL OPTIMIZED - COMPACT INTEGRATION FOR ALL SCREEN HEIGHTS) */}
-      <div className="flex xl:hidden flex-col w-full h-full max-w-md gap-4 items-center px-3 justify-center pt-6 pb-2 z-10 select-none overflow-hidden">
+      <div className="flex lg:hidden flex-col w-full h-full max-w-md gap-4 items-center px-3 justify-center pt-6 pb-2 z-10 select-none overflow-hidden">
         
-        {/* 📻 CENTERED VINYL & TONEARM FOR MOBILE (GUARANTEED PERFECT 1:1 CIRCLE) */}
-        <div className="relative w-[230px] h-[230px] xs:w-[265px] xs:h-[265px] sm:w-[290px] sm:h-[290px] aspect-square mx-auto flex items-center justify-center overflow-visible z-20 mt-2 shrink-0">
+        {/* 📻 CENTERED VINYL & TONEARM FOR MOBILE (DYNAMICALLY SCALES TO DYNAMIC VIEWPORT HEIGHT) */}
+        <div className="relative w-[34dvh] h-[34dvh] max-w-[280px] max-h-[280px] min-w-[160px] min-h-[160px] aspect-square mx-auto flex items-center justify-center overflow-visible z-20 mt-2 shrink-0">
           
           {/* Circular Platter / Vinyl */}
           <div 

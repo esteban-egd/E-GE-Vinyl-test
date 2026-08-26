@@ -65,13 +65,6 @@ export default function SearchPage() {
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && query.trim()) {
-      e.preventDefault();
-      searchImmediately(query.trim());
-    }
-  };
-
   // Liste des artistes pour les bulles en haut (filtrés et dédoublonnés strictement)
   const artistBubbles = useMemo(() => {
     if (query.trim() && results.artists?.length > 0) {
@@ -115,29 +108,42 @@ export default function SearchPage() {
     return TRENDING_TRACKS;
   }, [query, results.tracks]);
 
+  // Élimine le doublon du "Meilleur résultat" dans la liste des morceaux pour éviter le rendu "en double"
+  const displayTracksWithoutTop = useMemo(() => {
+    if (!topTrack) return displayTracks;
+    return displayTracks.filter(t => t.videoId !== topTrack.videoId && t.id !== topTrack.id);
+  }, [displayTracks, topTrack]);
+
   const isCurrentTrackPlaying = (videoId) => {
     return currentTrack?.videoId === videoId && isPlaying;
-  };
-
-  const isCurrentTrackLoading = (videoId) => {
-    return currentTrack?.videoId === videoId && isLoading;
   };
 
   return (
     <div className="w-full p-4 md:p-8 max-w-7xl mx-auto safe-top pb-32">
       {/* Barre de Recherche Épurée et Rapide */}
       <div className="shrink-0 pt-1 pb-3">
-        <div className="relative group">
+        <form 
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (query.trim()) {
+              searchImmediately(query.trim());
+              // Ferme le clavier virtuel sur mobile pour voir les résultats
+              if (document.activeElement) {
+                document.activeElement.blur();
+              }
+            }
+          }}
+          className="relative group"
+        >
           <Search 
-            className="absolute left-4.5 top-1/2 -translate-y-1/2 transition-colors duration-200" 
+            className="absolute left-4.5 top-1/2 -translate-y-1/2 transition-colors duration-200 pointer-events-none" 
             size={20} 
             style={{ color: query ? currentTheme.primary : '#94a3b8' }}
           />
           <input
-            type="text"
+            type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
             placeholder="Rechercher des artistes, titres, albums..."
             autoComplete="off"
             spellCheck="false"
@@ -155,6 +161,7 @@ export default function SearchPage() {
             />
           ) : query ? (
             <button
+              type="button"
               onClick={resetSearch}
               className="absolute right-4.5 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
               title="Effacer la recherche"
@@ -162,7 +169,7 @@ export default function SearchPage() {
               <X size={16} />
             </button>
           ) : null}
-        </div>
+        </form>
 
         {/* Suggestions & Recherches Récentes */}
         {!query && (
@@ -450,12 +457,12 @@ export default function SearchPage() {
                     {query ? 'Morceaux les plus populaires' : 'Titres les plus streamés'}
                   </h3>
                   <span className="text-[11px] text-gray-500">
-                    {displayTracks.length} titres
+                    {displayTracksWithoutTop.length + (topTrack ? 1 : 0)} titres
                   </span>
                 </div>
 
                 <div className="space-y-1.5">
-                  {displayTracks.slice(0, 8).map((track, i) => {
+                  {displayTracksWithoutTop.slice(0, 8).map((track, i) => {
                     const isThisActive = isCurrentTrack(track);
                     const isThisPlaying = isThisActive && isPlaying;
                     const isThisLoading = isThisActive && isLoading;

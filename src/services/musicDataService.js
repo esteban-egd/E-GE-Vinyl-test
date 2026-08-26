@@ -109,6 +109,12 @@ export function isArtistMatch(candidate, artistName) {
     if (partKey === targetKey) return true;
   }
 
+  // Fallback si l'un contient l'autre de manière évidente
+  const candKey = normalizeArtistKey(decodedCand);
+  if (candKey && targetKey && (candKey.includes(targetKey) || targetKey.includes(candKey))) {
+    return true;
+  }
+
   return false;
 }
 
@@ -1176,6 +1182,30 @@ export async function getArtistDetails(artistName) {
             }
           }
         } catch (_) {}
+      }
+    }
+
+    // e) Fallback YouTube Music si toujours moins de 5 titres trouvés pour l'artiste
+    if (topTracks.length < 5) {
+      try {
+        const ytTracks = await searchYouTubeMusic(cleanName);
+        if (Array.isArray(ytTracks) && ytTracks.length > 0) {
+          for (const yt of ytTracks) {
+            addTrack({
+              id: yt.videoId || yt.id,
+              videoId: yt.videoId || yt.id,
+              title: yt.title,
+              artist: yt.artist || cleanName,
+              album: 'Album YouTube',
+              thumbnail: yt.thumbnail || getArtistAvatar(cleanName),
+              duration: yt.duration || 210,
+              source: 'youtube',
+              rank: 350000
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[MusicDataService] Fallback YT pour artiste échoué:', err);
       }
     }
 

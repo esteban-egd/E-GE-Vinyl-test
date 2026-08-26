@@ -101,97 +101,94 @@ async function raceToSuccess(promises) {
 export async function searchLyraMusic(query) {
   if (!query || !query.trim()) return [];
   const cleanQuery = query.trim();
-  const isNative = isNativeEnvironment();
 
-  if (isNative) {
-    // 1. Direct Unified YouTube Server Search
-    try {
-      const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(cleanQuery)}`, {
-        signal: AbortSignal.timeout(5000)
-      });
-      if (res.ok) {
-        const tracks = await res.json();
-        if (Array.isArray(tracks) && tracks.length > 0) {
-          return tracks.map(t => ({
-            id: t.videoId,
-            videoId: t.videoId,
-            title: t.title,
-            artist: t.artist || 'Artiste inconnu',
-            thumbnail: t.thumbnail || `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg`,
-            duration: 210
-          }));
-        }
+  // 1. Direct Unified YouTube Server Search (extremely fast and works on both web & native)
+  try {
+    const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(cleanQuery)}`, {
+      signal: AbortSignal.timeout(5000)
+    });
+    if (res.ok) {
+      const tracks = await res.json();
+      if (Array.isArray(tracks) && tracks.length > 0) {
+        return tracks.map(t => ({
+          id: t.videoId,
+          videoId: t.videoId,
+          title: t.title,
+          artist: t.artist || 'Artiste inconnu',
+          thumbnail: t.thumbnail || `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg`,
+          duration: 210
+        }));
       }
-    } catch (err) {
-      console.warn('[LyraSearch] Server youtube-search unavailable:', err.message);
     }
-
-    // 2. Fallback Innertube WEB_REMIX
-    try {
-      const res = await fetch('/api/innertube-search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: cleanQuery }),
-        signal: AbortSignal.timeout(4000)
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        let sections = data?.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
-        if (!sections.length && data?.contents?.sectionListRenderer?.contents) {
-          sections = data.contents.sectionListRenderer.contents;
-        }
-
-        const tracks = [];
-
-        for (const section of sections) {
-          const card = section?.musicCardShelfRenderer;
-          if (card) {
-            const videoId = card.buttons?.find((b) => b?.buttonRenderer?.command?.watchEndpoint?.videoId)?.buttonRenderer?.command?.watchEndpoint?.videoId ||
-                            card.title?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId;
-            if (videoId) {
-              tracks.unshift({
-                id: videoId,
-                videoId: videoId,
-                title: card.title?.runs?.[0]?.text || '',
-                artist: card.subtitle?.runs?.map(r => r.text).join('') || 'Artiste inconnu',
-                thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-                duration: 210
-              });
-            }
-          }
-
-          const items = section?.musicShelfRenderer?.contents || [];
-          for (const item of items) {
-            const flexColumns = item?.musicResponsiveListItemRenderer?.flexColumns || [];
-            const videoId = item?.musicResponsiveListItemRenderer?.playlistItemData?.videoId ||
-                            item?.musicResponsiveListItemRenderer?.doubleTapData?.videoId;
-
-            if (videoId) {
-              const title = flexColumns[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || '';
-              const artistRuns = flexColumns[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
-              const artist = artistRuns.map(r => r.text).join('') || 'Artiste inconnu';
-
-              tracks.push({
-                id: videoId,
-                videoId: videoId,
-                title: title,
-                artist: artist,
-                thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-                duration: 210
-              });
-            }
-          }
-        }
-
-        if (tracks.length > 0) return tracks;
-      }
-    } catch (err) {
-      console.warn('[LyraSearch] Innertube non disponible:', err.message);
-    }
+  } catch (err) {
+    console.warn('[LyraSearch] Server youtube-search unavailable:', err.message);
   }
 
-  // Pure Web Search (Client-Side) or Native Fallback
+  // 2. Fallback Innertube WEB_REMIX via Server Proxy
+  try {
+    const res = await fetch('/api/innertube-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: cleanQuery }),
+      signal: AbortSignal.timeout(4000)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      let sections = data?.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+      if (!sections.length && data?.contents?.sectionListRenderer?.contents) {
+        sections = data.contents.sectionListRenderer.contents;
+      }
+
+      const tracks = [];
+
+      for (const section of sections) {
+        const card = section?.musicCardShelfRenderer;
+        if (card) {
+          const videoId = card.buttons?.find((b) => b?.buttonRenderer?.command?.watchEndpoint?.videoId)?.buttonRenderer?.command?.watchEndpoint?.videoId ||
+                          card.title?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId;
+          if (videoId) {
+            tracks.unshift({
+              id: videoId,
+              videoId: videoId,
+              title: card.title?.runs?.[0]?.text || '',
+              artist: card.subtitle?.runs?.map(r => r.text).join('') || 'Artiste inconnu',
+              thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+              duration: 210
+            });
+          }
+        }
+
+        const items = section?.musicShelfRenderer?.contents || [];
+        for (const item of items) {
+          const flexColumns = item?.musicResponsiveListItemRenderer?.flexColumns || [];
+          const videoId = item?.musicResponsiveListItemRenderer?.playlistItemData?.videoId ||
+                          item?.musicResponsiveListItemRenderer?.doubleTapData?.videoId;
+
+          if (videoId) {
+            const title = flexColumns[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || '';
+            const artistRuns = flexColumns[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
+            const artist = artistRuns.map(r => r.text).join('') || 'Artiste inconnu';
+
+            tracks.push({
+              id: videoId,
+              videoId: videoId,
+              title: title,
+              artist: artist,
+              thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+              duration: 210
+            });
+          }
+        }
+      }
+
+      if (tracks.length > 0) return tracks;
+    }
+  } catch (err) {
+    console.warn('[LyraSearch] Innertube non disponible:', err.message);
+  }
+
+  // 3. Fallback client-side Invidious instances if server is down
   const invidiousPromises = INVIDIOUS_INSTANCES.map(async (inst) => {
     const res = await fetch(`${inst}/api/v1/search?q=${encodeURIComponent(cleanQuery)}&type=video`, {
       signal: AbortSignal.timeout(4000)
