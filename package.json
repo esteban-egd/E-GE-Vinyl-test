@@ -3,6 +3,18 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
+  "main": "Lyra-Source-Code/electron-build/electron-main.js",
+  "build": {
+    "appId": "com.ege.vinyl",
+    "productName": "E-GE Vinyl",
+    "files": [
+      "dist/**/*",
+      "Lyra-Source-Code/**/*"
+    ],
+    "directories": {
+      "output": "dist_electron"
+    }
+  },
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
