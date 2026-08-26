@@ -2,26 +2,29 @@
   "name": "e-ge-vinyl",
   "private": true,
   "version": "0.2.0",
+  "description": "E-GE Vinyl Player App",
+  "author": "E-GE Vinyl",
   "type": "module",
   "main": "Lyra-Source-Code/electron-build/electron-main.js",
   "build": {
-    "appId": "com.ege.vinyl",
+    "appId": "com.egevinyl.app",
     "productName": "E-GE Vinyl",
-    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*"
+    ],
     "asarUnpack": [
       "**/node_modules/hash-wasm/**"
     ],
-    "files": [
-      "dist/**/*",
-      "Lyra-Source-Code/**/*",
-      "node_modules/**/*"
-    ],
-    "directories": {
-      "output": "dist_electron"
-    },
     "win": {
-      "certificateFile": "cert.pfx",
-      "certificatePassword": "vinylstore123"
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     }
   },
   "scripts": {
