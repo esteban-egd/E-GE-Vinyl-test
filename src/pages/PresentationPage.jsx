@@ -5,8 +5,8 @@ import ConstellationBackground from '../components/common/ConstellationBackgroun
 export default function PresentationPage({ onEnterWebPlayer, onEnterAsGuest }) {
   // Mock download links (pointing to releases or source downloaders)
   const downloadLinks = {
-    windows: 'https://github.com/guillermine/E-GE-Vinyl/releases/latest',
-    android: 'https://github.com/guillermine/E-GE-Vinyl/releases/download/v1.0.0/app-release.apk'
+    windows: 'https://github.com/esteban-egd/E-GE-Vinyl-test/releases/download/2.0.0/E-GE-VinylSetup.exe',
+    android: 'https://github.com/esteban-egd/E-GE-Vinyl-test/releases/download/2.0.0/E-GE-Vinyl.apk'
   };
 
   return (
