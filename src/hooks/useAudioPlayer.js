@@ -618,6 +618,18 @@ export function useAudioPlayer() {
           setError("Impossible de trouver ce titre.");
           setIsLoading(false);
           setIsPlaying(false);
+          
+          // Stop the iframe player if it is playing the default video
+          const currentPlayer = iframePlayerRef.current;
+          if (currentPlayer) {
+            try {
+              if (typeof currentPlayer.stopVideo === 'function') {
+                currentPlayer.stopVideo();
+              } else if (typeof currentPlayer.pauseVideo === 'function') {
+                currentPlayer.pauseVideo();
+              }
+            } catch (_) {}
+          }
         }
       })();
     }

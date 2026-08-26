@@ -52,8 +52,23 @@ export const INVIDIOUS_INSTANCES = [
   'https://invidious.jing.rocks',
   'https://invidious.privacyredirect.com',
   'https://invidious.drgns.space',
-  'https://yt.artemislena.eu'
+  'https://yt.artemislena.eu',
+  'https://invidious.projectsegfau.lt',
+  'https://invidious.flokinet.to'
 ];
+
+/**
+ * Détermine si l'application s'exécute dans un environnement natif (Electron, Capacitor...)
+ */
+function isNativeEnvironment() {
+  if (typeof window === 'undefined') return false;
+  const isElectron = Boolean(window.process?.versions?.electron || window.electron);
+  const isCapacitor = Boolean(window.Capacitor?.isNativePlatform?.() || window.Capacitor);
+  const isCordova = Boolean(window.cordova);
+  const isTauri = Boolean(window.__TAURI__);
+  const isAndroidApp = Boolean(window.Android || window.AndroidBridge);
+  return isElectron || isCapacitor || isCordova || isTauri || isAndroidApp;
+}
 
 /**
  * Lance plusieurs promesses en compétition et retourne la première qui réussit
@@ -86,97 +101,100 @@ async function raceToSuccess(promises) {
 export async function searchLyraMusic(query) {
   if (!query || !query.trim()) return [];
   const cleanQuery = query.trim();
+  const isNative = isNativeEnvironment();
 
-  // 1. Direct Unified YouTube Server Search
-  try {
-    const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(cleanQuery)}`, {
-      signal: AbortSignal.timeout(5000)
-    });
-    if (res.ok) {
-      const tracks = await res.json();
-      if (Array.isArray(tracks) && tracks.length > 0) {
-        return tracks.map(t => ({
-          id: t.videoId,
-          videoId: t.videoId,
-          title: t.title,
-          artist: t.artist || 'Artiste inconnu',
-          thumbnail: t.thumbnail || `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg`,
-          duration: 210
-        }));
+  if (isNative) {
+    // 1. Direct Unified YouTube Server Search
+    try {
+      const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(cleanQuery)}`, {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (res.ok) {
+        const tracks = await res.json();
+        if (Array.isArray(tracks) && tracks.length > 0) {
+          return tracks.map(t => ({
+            id: t.videoId,
+            videoId: t.videoId,
+            title: t.title,
+            artist: t.artist || 'Artiste inconnu',
+            thumbnail: t.thumbnail || `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg`,
+            duration: 210
+          }));
+        }
       }
+    } catch (err) {
+      console.warn('[LyraSearch] Server youtube-search unavailable:', err.message);
     }
-  } catch (err) {
-    console.warn('[LyraSearch] Server youtube-search unavailable:', err.message);
-  }
 
-  // 2. Fallback Innertube WEB_REMIX
-  try {
-    const res = await fetch('/api/innertube-search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: cleanQuery }),
-      signal: AbortSignal.timeout(4000)
-    });
+    // 2. Fallback Innertube WEB_REMIX
+    try {
+      const res = await fetch('/api/innertube-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: cleanQuery }),
+        signal: AbortSignal.timeout(4000)
+      });
 
-    if (res.ok) {
-      const data = await res.json();
-      let sections = data?.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
-      if (!sections.length && data?.contents?.sectionListRenderer?.contents) {
-        sections = data.contents.sectionListRenderer.contents;
-      }
+      if (res.ok) {
+        const data = await res.json();
+        let sections = data?.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+        if (!sections.length && data?.contents?.sectionListRenderer?.contents) {
+          sections = data.contents.sectionListRenderer.contents;
+        }
 
-      const tracks = [];
+        const tracks = [];
 
-      for (const section of sections) {
-        const card = section?.musicCardShelfRenderer;
-        if (card) {
-          const videoId = card.buttons?.find((b) => b?.buttonRenderer?.command?.watchEndpoint?.videoId)?.buttonRenderer?.command?.watchEndpoint?.videoId ||
-                          card.title?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId;
-          if (videoId) {
-            tracks.unshift({
-              id: videoId,
-              videoId: videoId,
-              title: card.title?.runs?.[0]?.text || '',
-              artist: card.subtitle?.runs?.map(r => r.text).join('') || 'Artiste inconnu',
-              thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-              duration: 210
-            });
+        for (const section of sections) {
+          const card = section?.musicCardShelfRenderer;
+          if (card) {
+            const videoId = card.buttons?.find((b) => b?.buttonRenderer?.command?.watchEndpoint?.videoId)?.buttonRenderer?.command?.watchEndpoint?.videoId ||
+                            card.title?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId;
+            if (videoId) {
+              tracks.unshift({
+                id: videoId,
+                videoId: videoId,
+                title: card.title?.runs?.[0]?.text || '',
+                artist: card.subtitle?.runs?.map(r => r.text).join('') || 'Artiste inconnu',
+                thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+                duration: 210
+              });
+            }
+          }
+
+          const items = section?.musicShelfRenderer?.contents || [];
+          for (const item of items) {
+            const flexColumns = item?.musicResponsiveListItemRenderer?.flexColumns || [];
+            const videoId = item?.musicResponsiveListItemRenderer?.playlistItemData?.videoId ||
+                            item?.musicResponsiveListItemRenderer?.doubleTapData?.videoId;
+
+            if (videoId) {
+              const title = flexColumns[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || '';
+              const artistRuns = flexColumns[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
+              const artist = artistRuns.map(r => r.text).join('') || 'Artiste inconnu';
+
+              tracks.push({
+                id: videoId,
+                videoId: videoId,
+                title: title,
+                artist: artist,
+                thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+                duration: 210
+              });
+            }
           }
         }
 
-        const items = section?.musicShelfRenderer?.contents || [];
-        for (const item of items) {
-          const flexColumns = item?.musicResponsiveListItemRenderer?.flexColumns || [];
-          const videoId = item?.musicResponsiveListItemRenderer?.playlistItemData?.videoId ||
-                          item?.musicResponsiveListItemRenderer?.doubleTapData?.videoId;
-
-          if (videoId) {
-            const title = flexColumns[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || '';
-            const artistRuns = flexColumns[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
-            const artist = artistRuns.map(r => r.text).join('') || 'Artiste inconnu';
-
-            tracks.push({
-              id: videoId,
-              videoId: videoId,
-              title: title,
-              artist: artist,
-              thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-              duration: 210
-            });
-          }
-        }
+        if (tracks.length > 0) return tracks;
       }
-
-      if (tracks.length > 0) return tracks;
+    } catch (err) {
+      console.warn('[LyraSearch] Innertube non disponible:', err.message);
     }
-  } catch (err) {
-    console.warn('[LyraSearch] Innertube non disponible:', err.message);
   }
 
-  // 2. Recherche Invidious en fallback
+  // Pure Web Search (Client-Side) or Native Fallback
   const invidiousPromises = INVIDIOUS_INSTANCES.map(async (inst) => {
     const res = await fetch(`${inst}/api/v1/search?q=${encodeURIComponent(cleanQuery)}&type=video`, {
-      signal: AbortSignal.timeout(3500)
+      signal: AbortSignal.timeout(4000)
     });
     if (!res.ok) throw new Error('Search failed');
     const data = await res.json();
