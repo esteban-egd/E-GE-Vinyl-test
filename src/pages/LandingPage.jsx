@@ -94,6 +94,17 @@ const LandingPage = ({ onBackToPresentation }) => {
           } catch (_) {}
         }
 
+        // If Supabase didn't log them in automatically (i.e. email confirmation required)
+        // we sign them in locally as a personalized user so they are NOT blocked!
+        if (data?.user && !data?.session) {
+          signInAsGuest(
+            email,
+            username || email.split('@')[0],
+            fullName || username || email.split('@')[0],
+            selectedAvatar
+          );
+        }
+
         toast.success("Votre compte a été configuré avec succès ! Bienvenue.");
       }
     } catch (error) {

@@ -65,11 +65,19 @@ export const AuthProvider = ({ children }) => {
     return () => subscription?.unsubscribe?.();
   }, []);
 
-  const signInAsGuest = () => {
-    const guest = { id: 'guest-local-user', email: 'guest@ege-vinyl.local', is_guest: true };
+  const signInAsGuest = (guestEmail, guestUsername, guestFullName, guestAvatarUrl) => {
+    const guest = { 
+      id: 'guest-' + (guestUsername || 'local-user'), 
+      email: guestEmail || 'guest@ege-vinyl.local', 
+      is_guest: true 
+    };
     localStorage.setItem('ege_guest_user', JSON.stringify(guest));
     setUser(guest);
-    setProfile({ full_name: 'Invité E-GE', username: 'guest' });
+    setProfile({ 
+      full_name: guestFullName || guestUsername || 'Invité E-GE', 
+      username: guestUsername || 'guest',
+      avatar_url: guestAvatarUrl || ''
+    });
   };
 
   const value = {

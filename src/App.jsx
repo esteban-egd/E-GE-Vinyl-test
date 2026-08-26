@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { BrowserRouter as Router, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
 import { AudioProvider, useAudio } from './context/AudioContext';
@@ -28,7 +28,16 @@ function AppContent() {
   const { user, loading, signInAsGuest } = useAuth();
   const { currentTrack } = useAudio();
   const location = useLocation();
+  const navigate = useNavigate();
   const [showLoginOnWeb, setShowLoginOnWeb] = useState(false);
+  const prevUserRef = useRef(user);
+
+  useEffect(() => {
+    if (user && !prevUserRef.current) {
+      navigate('/player');
+    }
+    prevUserRef.current = user;
+  }, [user, navigate]);
 
   // Auto-detection of Native Platform Target (Electron / Capacitor)
   const isNativeApp = import.meta.env.VITE_IS_APP === 'true' || 
