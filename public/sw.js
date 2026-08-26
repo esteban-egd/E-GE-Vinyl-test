@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ege-vinyl-v1';
+const CACHE_NAME = 'ege-vinyl-v1.1.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -28,7 +28,7 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch — Network first for API, Cache first for assets
+// Fetch — Network first for HTML/API, Cache first for assets
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -45,6 +45,31 @@ self.addEventListener('fetch', (event) => {
     url.search.includes('import') ||
     url.search.includes('t=')
   ) {
+    return;
+  }
+
+  // HTML or same-origin Navigation requests — strictly Network-First
+  const isHtmlRequest = request.headers.get('accept')?.includes('text/html') || 
+                        url.pathname === '/' || 
+                        url.pathname === '/index.html' ||
+                        request.mode === 'navigate';
+
+  if (isHtmlRequest && url.origin === self.location.origin) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, responseClone);
+            });
+          }
+          return response;
+        })
+        .catch(() => {
+          return caches.match(request);
+        })
+    );
     return;
   }
 

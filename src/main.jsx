@@ -7,8 +7,32 @@ import './index.css'
 // Register Service Worker in production only to avoid stale caching in dev/preview
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('SW registration failed:', err);
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        // Monitor for updates and reload on activation
+        registration.addEventListener('updatefound', () => {
+          const installingWorker = registration.installing;
+          if (installingWorker) {
+            installingWorker.addEventListener('statechange', () => {
+              if (installingWorker.state === 'activated' && navigator.serviceWorker.controller) {
+                // Instantly reload client pages to pick up the new build
+                window.location.reload();
+              }
+            });
+          }
+        });
+      })
+      .catch((err) => {
+        console.warn('SW registration failed:', err);
+      });
+
+    // Proactively check for Service Worker updates when the app is resumed or focused
+    window.addEventListener('focus', () => {
+      navigator.serviceWorker.getRegistration().then((reg) => {
+        if (reg) {
+          reg.update();
+        }
+      });
     });
   });
 } else if ('serviceWorker' in navigator) {
