@@ -13,6 +13,7 @@
         "dexie": "^4.4.5",
         "express": "^5.2.1",
         "idb": "^8.0.3",
+        "lightningcss-win32-x64-msvc": "^1.33.0",
         "lucide-react": "^1.31.0",
         "motion": "^13.1.1",
         "play-dl": "^1.9.7",
@@ -25,7 +26,6 @@
       },
       "devDependencies": {
         "@capacitor/cli": "^8.5.0",
-        "@rolldown/binding-win32-x64-msvc": "^1.2.5",
         "@tailwindcss/vite": "^4.3.3",
         "@types/react": "^19.2.17",
         "@types/react-dom": "^19.2.3",
@@ -34,6 +34,9 @@
         "oxlint": "^1.75.0",
         "tsx": "^4.23.12",
         "vite": "^8.2.0",
+      },
+      "optionalDependencies": {
+        "@rolldown/binding-win32-x64-msvc": "^1.2.5",
       },
     },
   },
@@ -349,6 +352,8 @@
     "lightningcss-linux-x64-gnu": ["lightningcss-linux-x64-gnu@1.33.0", "", { "os": "linux", "cpu": "x64" }, ""],
 
     "lightningcss-linux-x64-musl": ["lightningcss-linux-x64-musl@1.33.0", "", { "os": "linux", "cpu": "x64" }, ""],
+
+    "lightningcss-win32-x64-msvc": ["lightningcss-win32-x64-msvc@1.33.0", "", { "os": "win32", "cpu": "x64" }, "sha512-OlEICDx/Xl0FqSp4bry8zFnCvGpig3Gl4gCquvYwHuqJKEC1+n9NgDniFvqHGmMv1ZkqDJrDqKKSykTDX+ehuA=="],
 
     "lru-cache": ["lru-cache@11.5.2", "", {}, "sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g=="],
 

@@ -1,0 +1,25 @@
+{
+  "name": "E GE Vinyl",
+  "short_name": "E GE Vinyl",
+  "description": "Premium music streaming PWA with interactive vinyl player",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#8b5cf6",
+  "orientation": "any",
+  "categories": ["music", "entertainment"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

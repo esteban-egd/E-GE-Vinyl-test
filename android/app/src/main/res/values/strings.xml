@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">E-GE Vinyl</string>
+    <string name="title_activity_main">E-GE Vinyl</string>
+    <string name="package_name">com.ege.vinyl</string>
+    <string name="custom_url_scheme">com.ege.vinyl</string>
+</resources>
