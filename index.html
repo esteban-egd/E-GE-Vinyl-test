@@ -14,6 +14,52 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+      // Global error handling overlay to prevent silent black screen crashes
+      window.onerror = function (message, source, lineno, colno, error) {
+        var root = document.getElementById('root');
+        if (!root || !root.innerHTML || root.innerHTML.trim() === "") {
+          var overlay = document.getElementById('error-overlay');
+          if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'error-overlay';
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100%';
+            overlay.style.height = '100%';
+            overlay.style.backgroundColor = '#121214';
+            overlay.style.color = '#f4f4f5';
+            overlay.style.display = 'flex';
+            overlay.style.flexDirection = 'column';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.padding = '24px';
+            overlay.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+            overlay.style.textAlign = 'center';
+            overlay.style.zIndex = '999999';
+            
+            overlay.innerHTML = `
+              <div style="max-width: 480px; background: #1a1a1e; border: 1px solid #2d2d34; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+                <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                <h2 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 600; color: #f43f5e;">Erreur de chargement</h2>
+                <p style="margin: 0 0 20px 0; font-size: 14px; color: #a1a1aa; line-height: 1.5;">
+                  L'application n'a pas pu démarrer correctement. Veuillez recharger ou vider le cache.
+                </p>
+                <div style="background: #0f0f11; border: 1px solid #242429; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 11px; color: #fda4af; text-align: left; overflow-x: auto; max-height: 120px; margin-bottom: 24px; white-space: pre-wrap;">
+                  ${message}<br/>at ${source}:${lineno}:${colno}
+                </div>
+                <button onclick="window.location.reload(true)" style="background: #d97706; border: none; color: white; padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; font-size: 14px;">
+                  Recharger
+                </button>
+              </div>
+            `;
+            document.body.appendChild(overlay);
+          }
+        }
+        return false;
+      };
+    </script>
   </head>
   <body>
     <div id="root"></div>

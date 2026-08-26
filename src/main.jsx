@@ -5,10 +5,12 @@ import { ErrorBoundary } from './components/common/ErrorBoundary.jsx'
 import './index.css'
 
 // Auto-detection of Native Platform Target (Electron / Capacitor)
+const isWebView = /Android|wv|WebView/i.test(navigator.userAgent);
 const isNativeApp = import.meta.env.VITE_IS_APP === 'true' || 
                     !!window.ipcRenderer || 
                     !!window.Capacitor || 
                     !!window.android || 
+                    isWebView ||
                     (window.process && window.process.versions && !!window.process.versions.electron);
 
 // Register Service Worker in production only to avoid stale caching in dev/preview, but disable on native targets
