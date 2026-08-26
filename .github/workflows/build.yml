@@ -7,6 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ==========================================
+  # BUILD WINDOWS (.EXE)
+  # ==========================================
   build-electron:
     name: Build Windows App (.exe)
     runs-on: windows-latest
@@ -19,8 +22,10 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies (Force Windows Binaries)
-        run: npm install --force
+      - name: Install Windows Optional Bindings
+        run: |
+          npm install --force
+          npm install -D @tailwindcss/oxide-win32-x64-msvc --force
 
       - name: Build Web Assets
         env:
@@ -39,6 +44,9 @@ jobs:
           name: Windows-Executable
           path: dist/*.exe
 
+  # ==========================================
+  # BUILD ANDROID (.APK)
+  # ==========================================
   build-apk:
     name: Build Android App (.apk)
     runs-on: ubuntu-latest
@@ -51,25 +59,22 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup Java JDK
-        uses: actions/setup-java@v5
+      - name: Setup Java JDK 21
+        uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '21'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install dependencies (Force Linux Binaries)
+      - name: Install dependencies
         run: npm install --force
 
       - name: Build Web Assets for Capacitor
         env:
           VITE_IS_APP: "true"
         run: npm run build
-
-      - name: Add Android Platform if missing
-        run: npx cap add android || true
 
       - name: Sync Capacitor Android Project
         run: npx cap sync android
@@ -86,6 +91,9 @@ jobs:
           name: Android-APK
           path: android/app/build/outputs/apk/debug/*.apk
 
+  # ==========================================
+  # RELEASE GITHUB AUTOMATIQUE
+  # ==========================================
   create-release:
     name: Create GitHub Release
     needs: [build-electron, build-apk]
