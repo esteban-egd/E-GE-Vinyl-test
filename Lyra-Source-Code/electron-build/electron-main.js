@@ -10704,6 +10704,10 @@ function createDesktopMain(opts) {
         pendingDeepLink2 = null;
       }
     });
+    _mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDescription, validatedURL) => {
+      console.error(`[mainWindow] did-fail-load: ${errorCode} - ${errorDescription} for ${validatedURL}`);
+      // Dev fallback or alert
+    });
     mainWindowState.manage(_mainWindow);
     _mainWindow.on("close", (event) => {
       if (process.platform === "darwin" && !isQuitting2) {
@@ -10743,7 +10747,9 @@ function createDesktopMain(opts) {
   });
   import_electron16.app.whenReady().then(() => {
     if (!dev) {
-      const buildPath = import_path6.default.join(__dirname, "..", "..", "build");
+      const buildPath = require('fs').existsSync(import_path6.default.join(__dirname, "..", "..", "dist"))
+        ? import_path6.default.join(__dirname, "..", "..", "dist")
+        : import_path6.default.join(__dirname, "..", "..", "build");
       import_electron16.protocol.handle(packagedProtocolScheme, (request) => {
         const url = new URL(request.url);
         const filePath = import_path6.default.normalize(import_path6.default.join(buildPath, decodeURIComponent(url.pathname)));

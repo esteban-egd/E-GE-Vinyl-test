@@ -1,5 +1,1 @@
-import { useOfflineContext } from '../context/OfflineContext';
-
-export function useOffline() {
-  return useOfflineContext();
-}
+export { useOffline } from '../context/OfflineContext';

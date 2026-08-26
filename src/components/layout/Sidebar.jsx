@@ -1,5 +1,5 @@
 import { NavLink, Link } from 'react-router-dom';
-import { Home, Search, Library, Settings, Disc3, LogOut } from 'lucide-react';
+import { Home, Search, Library, Settings, Disc3, LogOut, User } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-hot-toast';
@@ -22,18 +22,22 @@ export default function Sidebar() {
     { path: '/player', label: 'Lecteur Vinyle', icon: Disc3 },
     { path: '/search', label: 'Recherche Universelle', icon: Search },
     { path: '/library', label: 'Ma Bibliothèque', icon: Library },
+    { path: '/profile', label: 'Mon Profil', icon: User },
     { path: '/settings', label: 'Thèmes & Réglages', icon: Settings },
   ];
 
   return (
-    <aside className="w-64 h-full bg-[#0d0c0b] border-r border-white/[0.04] flex flex-col z-50 transition-all duration-300">
+    <aside 
+      className="w-64 h-full border-r border-white/[0.04] flex flex-col z-50 transition-all duration-300"
+      style={{ backgroundColor: currentTheme.cardBg }}
+    >
       <div className="p-6 flex flex-col gap-1 shrink-0">
         <Link to="/" className="flex items-center gap-2.5 group hover:opacity-90 transition-all">
           <div 
-            className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg transition-transform duration-300 group-hover:scale-105"
+            className="w-8 h-8 rounded-full flex items-center justify-center shadow-lg transition-transform duration-300 group-hover:scale-105 shrink-0"
             style={{ 
-              background: '#c29e5a',
-              boxShadow: '0 0 15px rgba(194, 158, 90, 0.25)'
+              background: currentTheme.primary,
+              boxShadow: `0 0 15px ${currentTheme.glow}`
             }}
           >
             <Disc3 size={16} className="text-[#0d0c0b] animate-spin-slow" />
@@ -43,7 +47,10 @@ export default function Sidebar() {
             <span className="text-lg font-light tracking-widest ml-1 text-gray-500 uppercase">Vinyl</span>
           </div>
         </Link>
-        <span className="text-[9px] uppercase tracking-[0.25em] text-[#c29e5a] font-black mt-2">
+        <span 
+          className="text-[9px] uppercase tracking-[0.25em] font-black mt-2 transition-colors duration-300"
+          style={{ color: currentTheme.primary }}
+        >
           Salon Audiophile
         </span>
       </div>
@@ -56,18 +63,29 @@ export default function Sidebar() {
             className={({ isActive }) =>
               `flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all duration-300 text-xs font-semibold relative overflow-hidden group ${
                 isActive
-                  ? 'bg-white/[0.03] text-[#c29e5a] font-black border border-white/[0.04]'
+                  ? 'bg-white/[0.04] font-black border border-white/[0.06]'
                   : 'text-gray-400 hover:text-white hover:bg-white/[0.02]'
               }`
             }
+            style={({ isActive }) => (isActive ? { color: currentTheme.primary } : {})}
           >
             {({ isActive }) => (
               <>
                 {/* Active vertical bar indicator inside */}
                 {isActive && (
-                  <span className="absolute left-0 top-1/4 bottom-1/4 w-0.5 bg-[#c29e5a] rounded-full shadow-[0_0_8px_#c29e5a]" />
+                  <span 
+                    className="absolute left-0 top-1/4 bottom-1/4 w-0.5 rounded-full transition-colors duration-300"
+                    style={{ 
+                      backgroundColor: currentTheme.primary, 
+                      boxShadow: `0 0 8px ${currentTheme.primary}` 
+                    }} 
+                  />
                 )}
-                <item.icon size={16} className={`shrink-0 transition-transform duration-300 group-hover:scale-110 ${isActive ? 'text-[#c29e5a]' : 'text-gray-500'}`} />
+                <item.icon 
+                  size={16} 
+                  className="shrink-0 transition-transform duration-300 group-hover:scale-110" 
+                  style={{ color: isActive ? currentTheme.primary : undefined }}
+                />
                 <span className="tracking-widest uppercase text-[10px]">{item.label}</span>
               </>
             )}
@@ -77,11 +95,11 @@ export default function Sidebar() {
 
       <div className="p-4 space-y-3 shrink-0">
         <div className="p-4 rounded-2xl bg-black/40 border border-white/[0.03] text-center shadow-inner">
-          <p className="text-[8px] font-mono tracking-widest text-gray-500 uppercase mb-2">Thème Actif : {currentTheme.name}</p>
+          <p className="text-[8px] font-mono tracking-widest text-gray-400 uppercase mb-2">Thème : <span style={{ color: currentTheme.primary }}>{currentTheme.name}</span></p>
           <div className="flex justify-center items-center h-7 w-7 mx-auto rounded-full bg-white/[0.02] border border-white/[0.04]">
             <div 
-              className="h-2 w-2 rounded-full animate-pulse"
-              style={{ backgroundColor: '#c29e5a', boxShadow: '0 0 10px #c29e5a' }}
+              className="h-2 w-2 rounded-full animate-pulse transition-all duration-300"
+              style={{ backgroundColor: currentTheme.primary, boxShadow: `0 0 10px ${currentTheme.primary}` }}
             />
           </div>
         </div>

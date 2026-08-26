@@ -2,7 +2,7 @@ import { motion } from 'motion/react';
 import { Download, Play, Music, Radio, Shield, Laptop, Smartphone, ExternalLink, ShieldCheck } from 'lucide-react';
 import ConstellationBackground from '../components/common/ConstellationBackground';
 
-export default function PresentationPage({ onEnterWebPlayer, onEnterAsGuest }) {
+export default function PresentationPage({ onEnterWebPlayer, onEnterAsGuest, onOpenLogin }) {
   // Mock download links (pointing to releases or source downloaders)
   const downloadLinks = {
     windows: 'https://github.com/esteban-egd/E-GE-Vinyl-test/releases/download/2.0.0/E-GE-VinylSetup-2.0.exe',
@@ -34,7 +34,7 @@ export default function PresentationPage({ onEnterWebPlayer, onEnterAsGuest }) {
             Mode Démo
           </button>
           <button
-            onClick={onEnterWebPlayer}
+            onClick={onOpenLogin || onEnterWebPlayer}
             className="px-4 py-1.5 border border-[#c29e5a]/30 hover:border-[#c29e5a] text-[#c29e5a] text-[10px] uppercase tracking-widest font-black rounded-lg transition-all cursor-pointer"
           >
             Se connecter

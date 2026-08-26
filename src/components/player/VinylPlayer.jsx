@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAudio } from '../../context/AudioContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useLyrics } from '../../hooks/useLyrics';
 import { useLikes } from '../../hooks/useLikes';
 import { useOffline } from '../../hooks/useOffline';
+import { getMainArtistName } from '../../services/musicDataService';
 import VinylDisc from './VinylDisc';
 import Tonearm from './Tonearm';
 import LEDRing from './LEDRing';
 import AudioVisualizationDiagram from './AudioVisualizationDiagram';
 import PlayerControls from './PlayerControls';
 import LyricsView from './LyricsView';
+import DownloadBadge from '../common/DownloadBadge';
 import { 
   Disc, Sliders, ToggleLeft, ToggleRight,
   Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, 
@@ -46,6 +49,7 @@ export default function VinylPlayer() {
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
 
+  const navigate = useNavigate();
   const { currentTheme } = useTheme();
   const { isLiked, toggleLike } = useLikes();
   const { isDownloaded, downloadTrack, isDownloading, removeTrack } = useOffline();
@@ -612,13 +616,17 @@ export default function VinylPlayer() {
           <div className="flex justify-between items-center w-full">
             <div className="flex-1 min-w-0 pr-3">
               <h2 className="text-sm sm:text-base font-black text-white truncate leading-tight">
-                {currentTrack?.title || "Aucun vinyle sélectionné"}
+                <span className="flex items-center gap-2">
+                  {currentTrack?.title || "Aucun vinyle sélectionné"}
+                  {currentTrack && <DownloadBadge videoId={currentTrack.videoId || currentTrack.id} />}
+                </span>
               </h2>
               <p 
                 className="text-xs text-gray-400 truncate mt-0.5 cursor-pointer hover:text-white transition-colors"
                 onClick={() => {
                   if (currentTrack?.artist) {
-                    window.location.href = `/artist/${encodeURIComponent(currentTrack.artist)}`;
+                    const artistName = getMainArtistName(currentTrack.artist) || currentTrack.artist;
+                    navigate(`/artist/${encodeURIComponent(artistName)}`);
                   }
                 }}
               >
@@ -675,57 +683,94 @@ export default function VinylPlayer() {
           </div>
 
           {/* Action Row Buttons */}
-          <div className="flex justify-between items-center px-1">
+          <div className="flex justify-between items-center px-2">
             <button 
               disabled={!currentTrack}
               onClick={toggleShuffle}
-              className="p-1.5 rounded-full transition-colors hover:text-white cursor-pointer disabled:opacity-30"
-              style={shuffle ? { color: currentTheme?.primary || '#1ED760', backgroundColor: `${currentTheme?.primary || '#1ED760'}20` } : { color: '#9ca3af' }}
+              className="relative p-2.5 rounded-full transition-all hover:scale-105 active:scale-90 cursor-pointer disabled:opacity-30 flex items-center justify-center"
+              style={shuffle ? { 
+                color: currentTheme?.primary || '#1ED760', 
+                backgroundColor: `${currentTheme?.primary || '#1ED760'}25`,
+                boxShadow: `0 0 12px ${currentTheme?.primary || '#1ED760'}30`
+              } : { 
+                color: '#9ca3af',
+                backgroundColor: 'rgba(255,255,255,0.04)'
+              }}
+              title={shuffle ? 'Lecture aléatoire : Activée' : 'Lecture aléatoire : Désactivée'}
             >
-              <Shuffle size={16} />
+              <Shuffle size={18} />
+              {shuffle && (
+                <span 
+                  className="absolute bottom-1 w-1 h-1 rounded-full"
+                  style={{ backgroundColor: currentTheme?.primary || '#1ED760' }}
+                />
+              )}
             </button>
 
             <button 
               disabled={!currentTrack}
               onClick={playPrevious}
-              className="p-1.5 rounded-full text-gray-400 hover:text-white transition-all active:scale-90 cursor-pointer disabled:opacity-30"
+              className="p-2 rounded-full text-gray-300 hover:text-white hover:bg-white/10 transition-all active:scale-90 cursor-pointer disabled:opacity-30 flex items-center justify-center"
+              title="Précédent"
             >
-              <SkipBack size={20} />
+              <SkipBack size={22} />
             </button>
 
             <button 
               disabled={!currentTrack}
               onClick={togglePlayPause}
-              className="w-12 h-12 flex items-center justify-center rounded-full text-black hover:scale-105 active:scale-95 transition-all shadow-lg shrink-0 cursor-pointer disabled:opacity-50"
+              className="w-13 h-13 flex items-center justify-center rounded-full text-black hover:scale-105 active:scale-95 transition-all shadow-lg shrink-0 cursor-pointer disabled:opacity-50"
               style={{
                 backgroundColor: currentTheme?.primary || '#1ED760',
-                boxShadow: currentTrack ? `0 0 16px ${currentTheme?.glow || 'rgba(30, 215, 96, 0.4)'}` : 'none'
+                boxShadow: currentTrack ? `0 0 18px ${currentTheme?.glow || 'rgba(30, 215, 96, 0.4)'}` : 'none'
               }}
+              title={isPlaying ? 'Mettre en pause' : 'Lire le titre'}
             >
               {isLoading && !isPlaying ? (
-                <Loader2 size={22} className="animate-spin" />
+                <Loader2 size={24} className="animate-spin" />
               ) : isPlaying ? (
-                <Pause size={22} fill="black" />
+                <Pause size={24} fill="black" />
               ) : (
-                <Play size={22} fill="black" className="ml-0.5" />
+                <Play size={24} fill="black" className="ml-0.5" />
               )}
             </button>
 
             <button 
               disabled={!currentTrack}
               onClick={playNext}
-              className="p-1.5 rounded-full text-gray-400 hover:text-white transition-all active:scale-90 cursor-pointer disabled:opacity-30"
+              className="p-2 rounded-full text-gray-300 hover:text-white hover:bg-white/10 transition-all active:scale-90 cursor-pointer disabled:opacity-30 flex items-center justify-center"
+              title="Suivant"
             >
-              <SkipForward size={20} />
+              <SkipForward size={22} />
             </button>
 
             <button 
               disabled={!currentTrack}
               onClick={toggleRepeat}
-              className="p-1.5 rounded-full transition-colors hover:text-white cursor-pointer disabled:opacity-30"
-              style={repeat !== 'off' ? { color: currentTheme?.primary || '#1ED760', backgroundColor: `${currentTheme?.primary || '#1ED760'}20` } : { color: '#9ca3af' }}
+              className="relative p-2.5 rounded-full transition-all hover:scale-105 active:scale-90 cursor-pointer disabled:opacity-30 flex items-center justify-center"
+              style={repeat !== 'off' ? { 
+                color: currentTheme?.primary || '#1ED760', 
+                backgroundColor: `${currentTheme?.primary || '#1ED760'}25`,
+                boxShadow: `0 0 12px ${currentTheme?.primary || '#1ED760'}30`
+              } : { 
+                color: '#9ca3af',
+                backgroundColor: 'rgba(255,255,255,0.04)'
+              }}
+              title={
+                repeat === 'all'
+                  ? 'Répétition : Toute la file'
+                  : repeat === 'one'
+                  ? 'Répétition : Ce titre en boucle'
+                  : 'Répétition : Désactivée'
+              }
             >
-              {repeat === 'one' ? <Repeat1 size={16} /> : <Repeat size={16} />}
+              {repeat === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}
+              {repeat !== 'off' && (
+                <span 
+                  className="absolute bottom-1 w-1 h-1 rounded-full"
+                  style={{ backgroundColor: currentTheme?.primary || '#1ED760' }}
+                />
+              )}
             </button>
           </div>
         </div>

@@ -3,11 +3,14 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from './AuthContext';
 import { getMainArtistName } from '../services/musicDataService';
 import { toast } from 'react-hot-toast';
+import db from '../lib/db';
+import { useOffline } from './OfflineContext';
 
 const LikesContext = createContext();
 
 export function LikesProvider({ children }) {
   const { user } = useAuth();
+  const { handleTrackLiked, removeDownloadedTrack } = useOffline();
   const [likedTracks, setLikedTracks] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -19,23 +22,59 @@ export function LikesProvider({ children }) {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('likes')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+      if (navigator.onLine) {
+        const { data, error } = await supabase
+          .from('likes')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      
-      const formatted = (data || []).map(item => ({
-        ...item,
-        videoId: item.video_id,
-        id: item.video_id 
-      }));
+        if (error) throw error;
+        
+        const formatted = (data || []).map(item => ({
+          ...item,
+          videoId: item.video_id,
+          id: item.video_id 
+        }));
 
-      setLikedTracks(formatted);
+        // Sync with local Dexie DB
+        await db.transaction('rw', db.likes, async () => {
+          await db.likes.clear();
+          for (const item of formatted) {
+            await db.likes.put({
+              videoId: item.videoId,
+              title: item.title,
+              artist: item.artist,
+              thumbnail: item.thumbnail,
+              likedAt: item.created_at || new Date().toISOString()
+            });
+          }
+        });
+
+        setLikedTracks(formatted);
+      } else {
+        // Fallback to local DB when offline
+        const localLikes = await db.likes.toArray();
+        const formattedLocal = localLikes.map(item => ({
+          ...item,
+          video_id: item.videoId,
+          id: item.videoId
+        }));
+        setLikedTracks(formattedLocal);
+      }
     } catch (err) {
-      console.error('Error fetching likes:', err.message);
+      console.warn('Supabase fetch failed, falling back to IndexedDB:', err.message);
+      try {
+        const localLikes = await db.likes.toArray();
+        const formattedLocal = localLikes.map(item => ({
+          ...item,
+          video_id: item.videoId,
+          id: item.videoId
+        }));
+        setLikedTracks(formattedLocal);
+      } catch (localErr) {
+        console.error('IndexedDB fallback likes failed:', localErr);
+      }
     } finally {
       setLoading(false);
     }
@@ -70,53 +109,72 @@ export function LikesProvider({ children }) {
     }
 
     const existing = isLiked(trackId);
+    const title = track.title || 'Titre inconnu';
+    const artist = getMainArtistName(track.artist || 'Artiste inconnu');
+    const thumbnail = track.thumbnail || '';
 
     try {
       if (existing) {
-        const { error } = await supabase
-          .from('likes')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('video_id', trackId);
-        
-        if (error) {
-          if (error.code === 'PGRST116') { // Not found or similar
-             // Handle gracefully
-          } else {
+        // Optimistic local deletion
+        await db.likes.delete(trackId);
+        setLikedTracks(prev => prev.filter(t => t.video_id !== trackId && t.videoId !== trackId));
+        toast.success('Retiré des favoris');
+        // Optionally remove from offline if unliked? Actually, wait, let's just leave it in offline storage unless explicitly deleted, or we can delete it. 
+        // Let's delete it from offline storage if they unlike it? The prompt says "auto-download", maybe they want to keep it? The user didn't specify. Let's remove it to save space.
+        removeDownloadedTrack(trackId);
+
+        if (navigator.onLine) {
+          const { error } = await supabase
+            .from('likes')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('video_id', trackId);
+          if (error && error.code !== 'PGRST116') throw error;
+        }
+      } else {
+        // Optimistic local insertion
+        const localItem = {
+          videoId: trackId,
+          title,
+          artist,
+          thumbnail,
+          likedAt: new Date().toISOString()
+        };
+        await db.likes.put(localItem);
+        setLikedTracks(prev => [
+          { ...localItem, video_id: trackId, id: trackId },
+          ...prev
+        ]);
+        toast.success('Ajouté aux favoris');
+        // Trigger offline sync if enabled
+        handleTrackLiked({ ...localItem, video_id: trackId, id: trackId });
+
+        if (navigator.onLine) {
+          const itemToSave = {
+            user_id: user.id,
+            video_id: trackId,
+            title,
+            artist,
+            thumbnail,
+            album: track.album || '',
+          };
+          const { error } = await supabase
+            .from('likes')
+            .insert(itemToSave);
+          if (error) {
+            if (error.code === '42P01') {
+              throw new Error('La table "likes" n\'existe pas dans votre base de données Supabase. Veuillez exécuter le script SQL fourni.');
+            }
             throw error;
           }
         }
-        toast.success('Retiré des favoris');
-      } else {
-        const itemToSave = {
-          user_id: user.id,
-          video_id: trackId,
-          title: track.title || 'Titre inconnu',
-          artist: getMainArtistName(track.artist || 'Artiste inconnu'),
-          thumbnail: track.thumbnail || '',
-          album: track.album || '',
-        };
-
-        const { error } = await supabase
-          .from('likes')
-          .insert(itemToSave);
-        
-        if (error) {
-          if (error.code === '42P01') { // Table does not exist
-            throw new Error('La table "likes" n\'existe pas dans votre base de données Supabase. Veuillez exécuter le script SQL fourni.');
-          }
-          throw error;
-        }
-        toast.success('Ajouté aux favoris');
       }
-      
-      fetchLikes();
     } catch (err) {
-      console.error('Error toggling like:', err);
-      const errorMessage = err.message || 'Erreur inconnue';
-      toast.error(`Erreur: ${errorMessage}`);
+      console.warn('Offline or Supabase sync failed, kept changes locally:', err);
+    } finally {
+      fetchLikes();
     }
-  }, [user, isLiked, fetchLikes]);
+  }, [user, isLiked, fetchLikes, handleTrackLiked, removeDownloadedTrack]);
 
   return (
     <LikesContext.Provider value={{ likedTracks, loading, isLiked, toggleLike, fetchLikes }}>

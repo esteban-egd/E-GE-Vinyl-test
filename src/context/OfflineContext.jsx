@@ -1,327 +1,153 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from '../lib/supabaseClient';
-import { useAuth } from './AuthContext';
-import db from '../lib/db';
-import { getLyraAudioStream } from '../services/lyraAudio';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { isTrackDownloaded, downloadTrack as serviceDownloadTrack, removeTrack as serviceRemoveTrack, getDownloadedTracks } from '../services/offlineStorageService';
 import { toast } from 'react-hot-toast';
 
-const OfflineContext = createContext(null);
+const OfflineContext = createContext();
 
 export function OfflineProvider({ children }) {
-  const { user } = useAuth();
-  const [downloadedIds, setDownloadedIds] = useState(new Set());
-  const [downloadedTracks, setDownloadedTracks] = useState([]);
-  const [isDownloading, setIsDownloading] = useState(new Set());
-  
-  // Sync state
-  const [syncState, setSyncState] = useState({
-    isSyncing: false,
-    total: 0,
-    current: 0,
-    currentTitle: ''
-  });
-
-  const syncUserIdRef = useRef(null);
-
-  // Load offline tracks from IndexedDB
-  const loadOfflineTracks = useCallback(async () => {
-    if (!user || user.is_guest) {
-      setDownloadedTracks([]);
-      setDownloadedIds(new Set());
-      return;
-    }
-    try {
-      const tracks = await db.offlineTracks.toArray();
-      const userTracks = tracks.filter(t => 
-        (t.userIds && t.userIds.includes(user.id)) || t.userId === user.id
-      );
-      setDownloadedTracks(userTracks);
-      setDownloadedIds(new Set(userTracks.map(t => t.videoId)));
-    } catch (err) {
-      console.error('Failed to load offline tracks:', err);
-    }
-  }, [user]);
+  const [downloadedTrackIds, setDownloadedTrackIds] = useState(new Set());
+  const [downloadingIds, setDownloadingIds] = useState(new Set());
+  const [isSyncEnabled, setIsSyncEnabled] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(null); // { current: 0, total: 0, currentTitle: '' }
 
   useEffect(() => {
-    loadOfflineTracks();
-  }, [loadOfflineTracks]);
-
-  // Synchronize with Cloud (Supabase) sequentially
-  useEffect(() => {
-    if (!user || user.is_guest) {
-      syncUserIdRef.current = null;
-      setSyncState({ isSyncing: false, total: 0, current: 0, currentTitle: '' });
-      return;
-    }
-
-    // Prevent double-syncing for the same user session
-    if (syncUserIdRef.current === user.id) return;
-    syncUserIdRef.current = user.id;
-
-    const syncWithCloud = async () => {
+    // Load initial state
+    const loadState = async () => {
       try {
-        // 1. Fetch local track list
-        const allTracks = await db.offlineTracks.toArray();
-        const localTracks = allTracks.filter(t => 
-          (t.userIds && t.userIds.includes(user.id)) || t.userId === user.id
-        );
-        const localIds = new Set(localTracks.map(t => t.videoId));
-
-        // 2. Fetch remote track list
-        const { data: cloudTracks, error } = await supabase
-          .from('offline_tracks')
-          .select('*')
-          .eq('user_id', user.id);
-
-        if (error) {
-          console.error('Failed to load offline tracks from Supabase:', error);
-          return;
-        }
-
-        if (!cloudTracks || cloudTracks.length === 0) return;
-
-        // 3. Find tracks on the cloud that are missing locally
-        const missingLocally = cloudTracks.filter(ct => !localIds.has(ct.video_id));
-
-        if (missingLocally.length > 0) {
-          setSyncState({
-            isSyncing: true,
-            total: missingLocally.length,
-            current: 0,
-            currentTitle: missingLocally[0].title || 'Initialisation...'
-          });
-
-          let downloadedCount = 0;
-
-          for (const track of missingLocally) {
-            const trackId = track.video_id;
-            
-            setSyncState(prev => ({
-              ...prev,
-              current: downloadedCount,
-              currentTitle: `${track.artist} - ${track.title}`
-            }));
-
-            try {
-              // Check if track is already downloaded by another user locally
-              const existing = await db.offlineTracks.get(trackId);
-              const userIds = existing?.userIds ? [...existing.userIds] : (existing?.userId ? [existing.userId] : []);
-              if (!userIds.includes(user.id)) {
-                userIds.push(user.id);
-              }
-
-              let audioBlob = existing?.audioBlob || null;
-              let thumbnailBlob = existing?.thumbnailBlob || null;
-
-              // Only fetch over network if we don't have it locally
-              if (!audioBlob) {
-                const streamUrl = await getLyraAudioStream(trackId, track.title, track.artist);
-                if (streamUrl) {
-                  try {
-                    const audioRes = await fetch(streamUrl);
-                    if (audioRes.ok) audioBlob = await audioRes.blob();
-                  } catch (_) {}
-                }
-              }
-
-              if (!thumbnailBlob && track.thumbnail) {
-                try {
-                  const thumbRes = await fetch(track.thumbnail);
-                  if (thumbRes.ok) thumbnailBlob = await thumbRes.blob();
-                } catch (_) {}
-              }
-
-              // Save to local DB
-              await db.offlineTracks.put({
-                videoId: trackId,
-                userIds,
-                userId: user.id,
-                title: track.title,
-                artist: track.artist,
-                album: track.album || '',
-                thumbnail: track.thumbnail,
-                duration: track.duration,
-                audioBlob,
-                thumbnailBlob,
-                downloadedAt: track.downloaded_at || new Date().toISOString()
-              });
-            } catch (e) {
-              console.error(`Failed to sync track ${trackId} in background:`, e);
-            }
-
-            downloadedCount++;
-            setSyncState(prev => ({
-              ...prev,
-              current: downloadedCount
-            }));
-          }
-
-          // Complete syncing successfully
-          toast.success(`${missingLocally.length} titres restaurés hors-ligne !`, { duration: 4000 });
-          setSyncState({ isSyncing: false, total: 0, current: 0, currentTitle: '' });
-          await loadOfflineTracks();
-        }
+        const tracks = await getDownloadedTracks();
+        setDownloadedTrackIds(new Set(tracks.map(t => t.videoId)));
+        const syncPref = localStorage.getItem('ege-vinyl-sync-enabled') === 'true';
+        setIsSyncEnabled(syncPref);
       } catch (err) {
-        console.error('Error during cloud offline synchronization:', err);
-        setSyncState({ isSyncing: false, total: 0, current: 0, currentTitle: '' });
+        console.error('Failed to load offline tracks', err);
       }
     };
+    loadState();
+  }, []);
 
-    syncWithCloud();
-  }, [user, loadOfflineTracks]);
+  const isDownloaded = useCallback((videoId) => {
+    if (!videoId) return false;
+    return downloadedTrackIds.has(videoId);
+  }, [downloadedTrackIds]);
 
-  const isDownloaded = useCallback((trackId) => {
-    return downloadedIds.has(trackId);
-  }, [downloadedIds]);
+  const downloadTrackHandler = useCallback(async (track) => {
+    const videoId = track?.videoId || track?.video_id || track?.id;
+    if (!videoId) return false;
 
-  const downloadTrack = useCallback(async (track) => {
-    if (!user || user.is_guest) {
-      toast.error('Le mode Invité est restreint. Connectez-vous ou créez un compte pour télécharger des morceaux !', {
-        icon: '🔒',
-        duration: 4000
-      });
-      return;
+    if (downloadedTrackIds.has(videoId)) {
+      toast.success('Morceau déjà téléchargé');
+      return true;
     }
 
-    const trackId = track.videoId || track.id;
-    if (downloadedIds.has(trackId) || isDownloading.has(trackId)) return;
-
-    setIsDownloading(prev => new Set(prev).add(trackId));
-    const toastId = toast.loading('Téléchargement en cours...');
-
+    setDownloadingIds(prev => new Set(prev).add(videoId));
     try {
-      const existing = await db.offlineTracks.get(trackId);
-      const userIds = existing?.userIds ? [...existing.userIds] : (existing?.userId ? [existing.userId] : []);
-      if (!userIds.includes(user.id)) {
-        userIds.push(user.id);
-      }
-
-      let audioBlob = existing?.audioBlob || null;
-      let thumbnailBlob = existing?.thumbnailBlob || null;
-
-      if (!audioBlob) {
-        const streamUrl = await getLyraAudioStream(trackId, track.title, track.artist);
-        if (streamUrl) {
-          try {
-            const audioRes = await fetch(streamUrl);
-            if (audioRes.ok) audioBlob = await audioRes.blob();
-          } catch (e) {
-            console.warn('Audio download failed (CORS/Network), saving metadata only');
-          }
-        }
-      }
-
-      if (!thumbnailBlob && track.thumbnail) {
-        try {
-          const thumbRes = await fetch(track.thumbnail);
-          if (thumbRes.ok) thumbnailBlob = await thumbRes.blob();
-        } catch (e) {
-          console.warn('Could not download thumbnail, continuing...', e);
-        }
-      }
-
-      await db.offlineTracks.put({
-        videoId: trackId,
-        userIds,
-        userId: user.id,
-        title: track.title,
-        artist: track.artist,
-        album: track.album || '',
-        thumbnail: track.thumbnail,
-        duration: track.duration,
-        audioBlob,
-        thumbnailBlob,
-        downloadedAt: existing?.downloadedAt || new Date().toISOString()
-      });
-
-      const { error: supabaseError } = await supabase
-        .from('offline_tracks')
-        .upsert({
-          user_id: user.id,
-          video_id: trackId,
-          title: track.title,
-          artist: track.artist,
-          album: track.album || '',
-          thumbnail: track.thumbnail,
-          duration: track.duration,
-          downloaded_at: new Date().toISOString()
-        });
-
-      if (supabaseError) {
-        console.warn('Supabase sync failed (offline_tracks), but saved locally:', supabaseError);
-      }
-
-      await loadOfflineTracks();
-
-      if (!audioBlob) {
-        toast.success('Enregistré dans la bibliothèque (Le fichier audio complet sera disponible sur l\'application native .exe / .apk)', { id: toastId, duration: 5000 });
+      const success = await serviceDownloadTrack(track);
+      if (success) {
+        setDownloadedTrackIds(prev => new Set(prev).add(videoId));
+        toast.success(`"${track.title || 'Morceau'}" téléchargé hors-ligne !`, { icon: '💾' });
       } else {
-        toast.success('Morceau disponible hors-ligne', { id: toastId });
+        toast.error('Échec du téléchargement du morceau');
       }
+      return success;
     } catch (err) {
-      console.error('Download failed:', err);
-      toast.error(`Échec: ${err.message}`, { id: toastId });
+      console.error('Download track error:', err);
+      toast.error('Erreur lors du téléchargement');
+      return false;
     } finally {
-      setIsDownloading(prev => {
+      setDownloadingIds(prev => {
         const next = new Set(prev);
-        next.delete(trackId);
+        next.delete(videoId);
         return next;
       });
     }
-  }, [user, downloadedIds, isDownloading, loadOfflineTracks]);
+  }, [downloadedTrackIds]);
 
-  const removeTrack = useCallback(async (trackId) => {
+  const removeTrackHandler = useCallback(async (videoId) => {
+    if (!videoId) return;
     try {
-      if (!user) return;
+      await serviceRemoveTrack(videoId);
+      setDownloadedTrackIds(prev => {
+        const next = new Set(prev);
+        next.delete(videoId);
+        return next;
+      });
+      toast.success('Morceau retiré du stockage hors-ligne');
+    } catch (err) {
+      console.error('Remove track error:', err);
+    }
+  }, []);
 
-      const existing = await db.offlineTracks.get(trackId);
-      if (existing) {
-        const userIds = existing.userIds ? existing.userIds.filter(id => id !== user.id) : [];
+  const toggleSync = useCallback(async (likedTracks) => {
+    const newState = !isSyncEnabled;
+    setIsSyncEnabled(newState);
+    localStorage.setItem('ege-vinyl-sync-enabled', newState);
+
+    if (newState && likedTracks && likedTracks.length > 0) {
+      const toDownload = likedTracks.filter(t => !downloadedTrackIds.has(t.videoId || t.video_id || t.id));
+      if (toDownload.length > 0) {
+        setDownloadProgress({ current: 0, total: toDownload.length, currentTitle: toDownload[0].title || '' });
         
-        if (userIds.length > 0) {
-          await db.offlineTracks.put({
-            ...existing,
-            userIds,
-            userId: userIds[0]
-          });
-        } else {
-          await db.offlineTracks.delete(trackId);
+        for (let i = 0; i < toDownload.length; i++) {
+          const track = toDownload[i];
+          const vId = track.videoId || track.video_id || track.id;
+          setDownloadProgress({ current: i, total: toDownload.length, currentTitle: track.title || '' });
+          const success = await serviceDownloadTrack(track);
+          if (success) {
+            setDownloadedTrackIds(prev => new Set(prev).add(vId));
+          }
+          setDownloadProgress({ current: i + 1, total: toDownload.length, currentTitle: track.title || '' });
+        }
+        
+        setTimeout(() => setDownloadProgress(null), 2500);
+      }
+    }
+  }, [isSyncEnabled, downloadedTrackIds]);
+
+  const handleTrackLiked = useCallback(async (track) => {
+    if (isSyncEnabled) {
+      const videoId = track.videoId || track.video_id || track.id;
+      if (videoId && !downloadedTrackIds.has(videoId)) {
+        const success = await serviceDownloadTrack(track);
+        if (success) {
+          setDownloadedTrackIds(prev => new Set(prev).add(videoId));
         }
       }
-
-      await supabase
-        .from('offline_tracks')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('video_id', trackId);
-
-      await loadOfflineTracks();
-      toast.success('Morceau retiré du mode hors-ligne');
-    } catch (err) {
-      console.error('Failed to remove track:', err);
-      toast.error('Erreur lors de la suppression');
     }
-  }, [user, loadOfflineTracks]);
+  }, [isSyncEnabled, downloadedTrackIds]);
+
+  const syncState = useMemo(() => {
+    if (!downloadProgress) return { isSyncing: false, current: 0, total: 0, currentTitle: '' };
+    return {
+      isSyncing: true,
+      current: downloadProgress.current,
+      total: downloadProgress.total,
+      currentTitle: downloadProgress.currentTitle || 'Téléchargement...'
+    };
+  }, [downloadProgress]);
 
   return (
     <OfflineContext.Provider value={{
-      downloadedTracks,
-      downloadedIds,
-      isDownloading,
+      downloadedTrackIds,
       isDownloaded,
-      downloadTrack,
-      removeTrack,
-      syncState
+      isDownloading: downloadingIds,
+      downloadTrack: downloadTrackHandler,
+      removeTrack: removeTrackHandler,
+      removeDownloadedTrack: removeTrackHandler,
+      isSyncEnabled,
+      toggleSync,
+      downloadProgress,
+      syncState,
+      handleTrackLiked
     }}>
       {children}
     </OfflineContext.Provider>
   );
 }
 
-export function useOfflineContext() {
+export function useOffline() {
   const context = useContext(OfflineContext);
   if (!context) {
-    throw new Error('useOfflineContext must be used within an OfflineProvider');
+    throw new Error('useOffline must be used within an OfflineProvider');
   }
   return context;
 }

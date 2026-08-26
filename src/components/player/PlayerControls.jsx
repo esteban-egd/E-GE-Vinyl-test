@@ -157,11 +157,24 @@ export default function PlayerControls() {
         <div className="flex justify-between items-center px-1">
           <button 
             onClick={toggleShuffle}
-            className="p-2 rounded-full transition-colors hover:text-white"
-            style={shuffle ? { color: currentTheme?.primary || '#1ED760', backgroundColor: `${currentTheme?.primary || '#1ED760'}25` } : { color: '#9ca3af' }}
-            title="Lecture Aléatoire"
+            className="relative p-2.5 rounded-full transition-all hover:scale-105 active:scale-90 flex items-center justify-center"
+            style={shuffle ? { 
+              color: currentTheme?.primary || '#1ED760', 
+              backgroundColor: `${currentTheme?.primary || '#1ED760'}25`,
+              boxShadow: `0 0 12px ${currentTheme?.primary || '#1ED760'}30`
+            } : { 
+              color: '#9ca3af',
+              backgroundColor: 'rgba(255,255,255,0.04)'
+            }}
+            title={shuffle ? 'Lecture aléatoire : Activée' : 'Lecture aléatoire : Désactivée'}
           >
             <Shuffle size={18} />
+            {shuffle && (
+              <span 
+                className="absolute bottom-1 w-1 h-1 rounded-full"
+                style={{ backgroundColor: currentTheme?.primary || '#1ED760' }}
+              />
+            )}
           </button>
 
           <div className="flex items-center gap-3">
@@ -203,11 +216,30 @@ export default function PlayerControls() {
 
           <button 
             onClick={toggleRepeat}
-            className="p-2 rounded-full transition-colors hover:text-white"
-            style={repeat !== 'off' ? { color: currentTheme?.primary || '#1ED760', backgroundColor: `${currentTheme?.primary || '#1ED760'}25` } : { color: '#9ca3af' }}
-            title={`Répétition: ${repeat}`}
+            className="relative p-2.5 rounded-full transition-all hover:scale-105 active:scale-90 flex items-center justify-center"
+            style={repeat !== 'off' ? { 
+              color: currentTheme?.primary || '#1ED760', 
+              backgroundColor: `${currentTheme?.primary || '#1ED760'}25`,
+              boxShadow: `0 0 12px ${currentTheme?.primary || '#1ED760'}30`
+            } : { 
+              color: '#9ca3af',
+              backgroundColor: 'rgba(255,255,255,0.04)'
+            }}
+            title={
+              repeat === 'all'
+                ? 'Répétition : Toute la file'
+                : repeat === 'one'
+                ? 'Répétition : Ce titre en boucle'
+                : 'Répétition : Désactivée'
+            }
           >
             {repeat === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}
+            {repeat !== 'off' && (
+              <span 
+                className="absolute bottom-1 w-1 h-1 rounded-full"
+                style={{ backgroundColor: currentTheme?.primary || '#1ED760' }}
+              />
+            )}
           </button>
         </div>
 

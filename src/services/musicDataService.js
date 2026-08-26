@@ -5,7 +5,10 @@
  */
 
 import { getLyraAudioStream, searchYouTubeMusic, extractYouTubeId } from './lyraAudio';
-export { extractYouTubeId };
+import db from '../lib/db';
+import { classifyTrack, sortTracksByPriority, cleanTitleAndArtist } from '../utils/trackClassifier';
+import { parseDurationToSeconds, getRealisticDuration } from '../utils/formatDuration';
+export { extractYouTubeId, classifyTrack, sortTracksByPriority, cleanTitleAndArtist };
 
 const memoryCache = new Map();
 
@@ -225,6 +228,78 @@ export function scoreAudioTrack(track, cleanTitle, cleanArtist) {
   return score;
 }
 
+// Distance de Levenshtein pour la recherche tolérante aux fautes de frappe
+export function levenshtein(a, b) {
+  if (!a || !b) return ((a || '').length + (b || '').length);
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+// Score de similarité floue entre deux chaînes (titres, albums, artistes)
+export function calcFuzzySimilarity(query, target) {
+  if (!query || !target) return 0;
+  const qNorm = query.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "");
+  const tNorm = target.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "");
+
+  if (!qNorm || !tNorm) return 0;
+  if (qNorm === tNorm) return 10000;
+  if (tNorm.startsWith(qNorm)) return 7000;
+  if (tNorm.includes(qNorm)) return 4000;
+
+  const qWords = qNorm.split(/\s+/).filter(Boolean);
+  const tWords = tNorm.split(/\s+/).filter(Boolean);
+
+  let wordScore = 0;
+  for (const qw of qWords) {
+    for (const tw of tWords) {
+      if (tw === qw) {
+        wordScore += 2000;
+        break;
+      } else if (tw.startsWith(qw)) {
+        wordScore += 1200;
+        break;
+      } else if (qw.length >= 3 && tw.length >= 3) {
+        const dist = levenshtein(qw, tw);
+        if (dist <= 1) {
+          wordScore += 1000;
+          break;
+        } else if (dist <= 2 && qw.length >= 5) {
+          wordScore += 600;
+          break;
+        }
+      }
+    }
+  }
+
+  if (qNorm.length >= 4 && Math.abs(qNorm.length - tNorm.length) <= 3) {
+    const fullDist = levenshtein(qNorm, tNorm);
+    if (fullDist <= 2) {
+      return Math.max(wordScore, 5000 - fullDist * 1000);
+    }
+  }
+
+  return wordScore;
+}
+
 // Calcul du score de similarité d'un nom d'artiste par rapport à une recherche utilisateur (gère fautes de frappe ex: "emy w" -> "Amy Winehouse", "daft p" -> "Daft Punk")
 export function calcArtistSimilarity(query, artistName) {
   if (!query || !artistName) return 0;
@@ -323,17 +398,17 @@ export async function getDeezerPreview(title, artist) {
  * Recherche globale unifiée (Lyra & Spotify style ranking)
  * Classement par popularité, pertinence et hits les plus écoutés
  */
-export async function searchUnified(query) {
+export async function searchUnified(query, audioMode = 'studio') {
   if (!query || !query.trim()) return { tracks: [], artists: [], albums: [] };
   const cleanQuery = query.trim().toLowerCase();
-  const cacheKey = `unified_search_v4_${cleanQuery}`;
+  const cacheKey = `unified_search_v5_${cleanQuery}_${audioMode}`;
 
   if (memoryCache.has(cacheKey)) {
     return memoryCache.get(cacheKey);
   }
 
   try {
-    // 1. Requêtes parallèles multi-sources : iTunes HD + Deezer Ranking + YouTube Music
+    // 1. Requêtes parallèles multi-sources : iTunes HD + Deezer Ranking + Deezer Albums + YouTube Music
     const itunesSongsPromise = fetch(
       `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=30`,
       { signal: AbortSignal.timeout(2500) }
@@ -345,7 +420,7 @@ export async function searchUnified(query) {
     ).then(res => res.json()).catch(() => ({ results: [] }));
 
     const itunesAlbumsPromise = fetch(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=album&limit=12`,
+      `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=album&limit=15`,
       { signal: AbortSignal.timeout(2500) }
     ).then(res => res.json()).catch(() => ({ results: [] }));
 
@@ -357,19 +432,61 @@ export async function searchUnified(query) {
       signal: AbortSignal.timeout(3000)
     }).then(res => res.json()).catch(() => ({ data: [] }));
 
+    const deezerAlbumPromise = fetch(`/api/deezer-search-album?q=${encodeURIComponent(query)}`, {
+      signal: AbortSignal.timeout(3000)
+    }).then(res => res.json()).catch(() => ({ data: [] }));
+
     const lyraSearchPromise = searchYouTubeMusic(query).catch(() => []);
 
-    const [songsData, artistsData, albumsData, deezerData, dzArtistsData, lyraResults] = await Promise.all([
+    const [songsData, artistsData, albumsData, deezerData, dzArtistsData, deezerAlbumData, lyraResults] = await Promise.all([
       itunesSongsPromise,
       itunesArtistsPromise,
       itunesAlbumsPromise,
       deezerSearchPromise,
       deezerArtistPromise,
+      deezerAlbumPromise,
       lyraSearchPromise
     ]);
 
     const rawTracks = [];
     const seenMap = new Map();
+
+    // 0. Recherche dans le catalogue local pré-chargé (Trending, New Releases, Decades) pour affichage instantané
+    const localCatalog = [
+      ...(Array.isArray(TRENDING_TRACKS) ? TRENDING_TRACKS : []),
+      ...(Array.isArray(FRESH_NEW_RELEASES) ? FRESH_NEW_RELEASES : [])
+    ];
+
+    for (const item of localCatalog) {
+      if (!item || !item.title) continue;
+      const titleSim = calcFuzzySimilarity(cleanQuery, item.title);
+      const artistSim = calcFuzzySimilarity(cleanQuery, item.artist || '');
+      const albumSim = calcFuzzySimilarity(cleanQuery, item.album || '');
+
+      if (titleSim > 1500 || artistSim > 1500 || albumSim > 1500) {
+        const normTitle = (item.title || '').toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').trim();
+        const normArtist = (item.artist || '').toLowerCase().trim();
+        const key = `${normTitle}__${normArtist}`;
+
+        if (!seenMap.has(key)) {
+          const trackObj = {
+            id: item.videoId || item.id || key,
+            videoId: item.videoId || item.id || key,
+            title: item.title,
+            artist: item.artist || 'Artiste inconnu',
+            album: item.album || '',
+            thumbnail: item.thumbnail || '',
+            duration: parseDurationToSeconds(item.duration, `${item.title}_${item.artist}_${item.id}`),
+            source: 'curated',
+            rank: 900000,
+            popularity: 98,
+            isCurated: true
+          };
+          seenMap.set(key, trackObj);
+          rawTracks.push(trackObj);
+        }
+      }
+    }
 
     // 0. Si un artiste officiel correspond (ex: "Téléphone", "Daft Punk", etc.), chercher ses top tracks officielles
     const matchedArtist = dzArtistsData?.data?.find(a => 
@@ -395,7 +512,7 @@ export async function searchUnified(query) {
                   artist: d.artist?.name || matchedArtist.name,
                   album: d.album?.title || '',
                   thumbnail: d.album?.cover_xl || d.album?.cover_big || matchedArtist.picture_xl || '',
-                  duration: d.duration || 210,
+                  duration: parseDurationToSeconds(d.duration, `${d.title}_${matchedArtist.name}_${d.id}`),
                   source: 'deezer',
                   previewUrl: d.preview,
                   rank: (d.rank || 500000) + 300000,
@@ -427,7 +544,7 @@ export async function searchUnified(query) {
             artist: d.artist?.name || 'Artiste inconnu',
             album: d.album?.title || '',
             thumbnail: d.album?.cover_xl || d.album?.cover_big || d.album?.cover_medium || (d.artist?.picture_xl || ''),
-            duration: d.duration || 210,
+            duration: parseDurationToSeconds(d.duration, `${d.title}_${d.artist?.name}_${d.id}`),
             source: 'deezer',
             previewUrl: d.preview,
             rank: d.rank || 500000,
@@ -455,7 +572,7 @@ export async function searchUnified(query) {
             artist: s.artistName,
             album: s.collectionName,
             thumbnail: getHdArtwork(s.artworkUrl100),
-            duration: Math.round((s.trackTimeMillis || 200000) / 1000),
+            duration: parseDurationToSeconds(s.trackTimeMillis ? Math.round(s.trackTimeMillis / 1000) : null, `${s.trackName}_${s.artistName}_${s.trackId}`),
             source: 'itunes',
             previewUrl: s.previewUrl,
             rank: 600000,
@@ -491,7 +608,7 @@ export async function searchUnified(query) {
             artist: item.artist || 'Artiste inconnu',
             album: item.album || '',
             thumbnail: getHdArtwork(item.thumbnail, item.videoId),
-            duration: item.duration || 210,
+            duration: parseDurationToSeconds(item.duration, `${item.title}_${item.artist}_${item.videoId}`),
             source: 'youtube',
             rank: 400000,
             popularity: 60
@@ -508,52 +625,91 @@ export async function searchUnified(query) {
       }
     }
 
-    // 4. Algorithme de Scoring intelligent : Popularité + Match Artiste + Version Studio prioritaire
+    // 4. Algorithme de Scoring intelligent & Classification par ordre strict de priorité
     const cleanQueryNorm = cleanQuery.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const userWantsLive = /\b(live|concert|en direct|unplugged)\b/i.test(cleanQuery);
+    const userExplicitlyRequestedLive = /\b(live|concert|en direct|unplugged)\b/i.test(cleanQuery);
+    const isLiveModeActive = audioMode === 'live' || userExplicitlyRequestedLive;
 
-    const scoredTracks = rawTracks.map(t => {
+    const scoredTracks = rawTracks.map(rawT => {
+      const t = classifyTrack(rawT) || rawT;
       let score = (t.rank || 100000) / 10000;
       const lowerTitle = (t.title || '').toLowerCase();
       const lowerTitleNorm = lowerTitle.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       const lowerArtist = (t.artist || '').toLowerCase();
       const lowerArtistNorm = lowerArtist.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const lowerAlbum = (t.album || '').toLowerCase();
+      const lowerAlbumNorm = lowerAlbum.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-      // Si le morceau appartient directement à l'artiste recherché (ex: Téléphone)
+      // Bonus si morceau direct de l'artiste recherché
       if (t.isDirectArtistTrack) {
         score += 250;
       }
+      if (t.isCurated) {
+        score += 150;
+      }
 
+      // Fuzzy matching multi-champs
+      const titleFuzzy = calcFuzzySimilarity(cleanQuery, lowerTitle);
+      const artistFuzzy = calcFuzzySimilarity(cleanQuery, lowerArtist);
+      const albumFuzzy = calcFuzzySimilarity(cleanQuery, lowerAlbum);
+
+      score += (titleFuzzy / 50);
+      score += (artistFuzzy / 40);
+      score += (albumFuzzy / 80);
+
+      // Correspondances directes
       if (lowerArtistNorm === cleanQueryNorm) score += 200;
       else if (lowerArtistNorm.startsWith(cleanQueryNorm)) score += 100;
       else if (lowerArtistNorm.includes(cleanQueryNorm)) score += 40;
 
-      if (lowerTitleNorm === cleanQueryNorm) score += 70;
-      else if (lowerTitleNorm.startsWith(cleanQueryNorm)) score += 40;
-      else if (lowerTitleNorm.includes(cleanQueryNorm)) score += 20;
+      if (lowerTitleNorm === cleanQueryNorm) score += 150;
+      else if (lowerTitleNorm.startsWith(cleanQueryNorm)) score += 80;
+      else if (lowerTitleNorm.includes(cleanQueryNorm)) score += 30;
 
-      // Pénalisation stricte des versions live au profit des vraies versions studio officielles
-      const isLive = isLiveTrack(t.title);
-      if (isLive && !userWantsLive) {
-        score -= 800; // Pénalité maximale pour éliminer les versions live en tête de recherche
-      } else if (!isLive && !userWantsLive) {
-        score += 200; // Bonus majeur pour la vraie version studio officielle
+      if (lowerAlbumNorm === cleanQueryNorm) score += 100;
+      else if (lowerAlbumNorm.includes(cleanQueryNorm)) score += 25;
+
+      // =========================================================================
+      // SCORING STRICT SELON L'ORDRE DE PRIORITÉ :
+      // Priorité 1 : Versions "Audio" officielles (Topic / Official Audio / Auto-generated / Remaster)
+      // Priorité 2 : Clips vidéo officiels (Official Video / Clip Officiel)
+      // Priorité 3 : Versions "Live" ou "Concert"
+      // Priorité 4 : Covers, remix non officiels, versions ralenties/speed up (nightcore)
+      // =========================================================================
+      if (isLiveModeActive) {
+        if (t.isLive) {
+          score += 1500; // Priorité 1 absolue en mode Live
+        } else if (t.isOfficialAudio || t.isRemaster || t.category === 'STUDIO') {
+          score += 300;
+        } else if (t.isOfficialVideo) {
+          score += 150;
+        }
+      } else {
+        // Mode Studio (défaut) :
+        if (t.isOfficialAudio || t.isRemaster || (t.category === 'STUDIO' && !t.isLive && !t.isFanOrCover)) {
+          score += 600; // Priorité 1 : Versions audio studio officielles
+        } else if (t.isOfficialVideo) {
+          score += 300; // Priorité 2 : Clips vidéo officiels
+        } else if (t.isLive) {
+          score -= 600; // Priorité 3 : Live relégué sous les versions studio
+        }
       }
 
-      const isNoise = /karaoke|cover|remix|slowed|reverb|tribute|instrumental/i.test(t.title);
-      if (!isNoise) score += 25;
-      else score -= 300;
+      // Priorité 4 : Fort rejet des reprises non officielles, karaoke, nightcore, etc.
+      if (t.isFanOrCover) {
+        score -= 1500;
+      }
 
       return { ...t, relevanceScore: score };
     });
 
-    // Tri décroissant selon la pertinence & popularité
-    scoredTracks.sort((a, b) => b.relevanceScore - a.relevanceScore);
+    // Tri décroissant selon la priorité et le score
+    const sortedTracks = sortTracksByPriority(scoredTracks, isLiveModeActive ? 'live' : 'studio');
 
-    // Déduplication stricte des morceaux (évite d'avoir 2x ou 3x le même titre/artiste)
+    // Déduplication stricte des morceaux
     const uniqueScoredTracks = [];
     const seenTrackKeys = new Set();
-    for (const track of scoredTracks) {
+    for (const track of sortedTracks) {
       const normTitle = (track.title || '').toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').trim();
       const normArtist = normalizeArtistKey(getMainArtistName(track.artist));
       const trackKey = `${normTitle}___${normArtist}`;
@@ -567,28 +723,13 @@ export async function searchUnified(query) {
     const rawArtists = [];
     const seenArtistKeys = new Set();
 
-    // Helper pour trouver la meilleure pochette disponible pour un artiste
     const findBestArtistArtwork = (artName, defaultPic = null) => {
       if (isValidArtwork(defaultPic)) return defaultPic;
 
-      // 1. Chercher dans les artistes mis en avant
       const featured = FEATURED_ARTISTS.find(f => normalizeArtistKey(getMainArtistName(f.name)) === normalizeArtistKey(getMainArtistName(artName)));
       if (featured && isValidArtwork(featured.avatar)) return featured.avatar;
 
-      // 2. Chercher dans les morceaux trouvés
-      const trackMatch = rawTracks.find(t => 
-        normalizeArtistKey(getMainArtistName(t.artist)) === normalizeArtistKey(getMainArtistName(artName)) && isValidArtwork(t.thumbnail)
-      );
-      if (trackMatch) return trackMatch.thumbnail;
-
-      // 3. Chercher dans les albums
-      if (albumsData.results && Array.isArray(albumsData.results)) {
-        const albumMatch = albumsData.results.find(alb => 
-          normalizeArtistKey(getMainArtistName(alb.artistName)) === normalizeArtistKey(getMainArtistName(artName)) && alb.artworkUrl100
-        );
-        if (albumMatch) return getHdArtwork(albumMatch.artworkUrl100);
-      }
-
+      // EXPLICITEMENT AUCUN FALLBACK SUR LES COVERS D'ALBUM OU DE TRACK
       return null;
     };
 
@@ -656,14 +797,14 @@ export async function searchUnified(query) {
       }
     }
 
-    // d) Artistes extraits des morceaux populaires (gère les fautes de frappe comme "emy w" -> "Amy Winehouse")
+    // d) Artistes extraits des morceaux populaires
     for (const t of uniqueScoredTracks) {
       if (!t.artist || isJunkArtist(t.artist)) continue;
       const mainName = getMainArtistName(t.artist);
       const key = normalizeArtistKey(mainName);
       if (key && !seenArtistKeys.has(key)) {
         seenArtistKeys.add(key);
-        const artwork = findBestArtistArtwork(mainName, t.thumbnail);
+        const artwork = findBestArtistArtwork(mainName, null);
         rawArtists.push({
           id: `trk_art_${key}`,
           name: mainName,
@@ -675,49 +816,140 @@ export async function searchUnified(query) {
       }
     }
 
-    // e) Calcul de la dominance et classement ultime des artistes
+    // e) Nettoyage, Dédoublonnage et Scoring (Filtre Strict)
+    const uniqueArtistsMap = new Map();
     for (const a of rawArtists) {
+      const mainNameKey = normalizeArtistKey(a.name);
+      if (!mainNameKey) continue;
+      
+      const isExactMatch = mainNameKey === normalizeArtistKey(cleanQuery);
+      const isIncluded = mainNameKey.includes(normalizeArtistKey(cleanQuery)) || normalizeArtistKey(cleanQuery).includes(mainNameKey);
+      
+      // Strict filter: must at least contain the search query somewhat, unless it's a related feature
+      if (!isIncluded && !isExactMatch) continue;
+      
+      const hasSignificantFans = (a.nbFans || 0) >= 1000;
+      // Exclude obscure homonyms unless exact match or significant fanbase
+      if (!isExactMatch && !hasSignificantFans && !a.isOfficial) continue;
+      
+      const existing = uniqueArtistsMap.get(mainNameKey);
+      if (!existing) {
+        uniqueArtistsMap.set(mainNameKey, a);
+      } else {
+        if ((a.nbFans || 0) > (existing.nbFans || 0)) existing.nbFans = a.nbFans;
+        if (a.deezerId && !existing.deezerId) existing.deezerId = a.deezerId;
+        if (isValidArtwork(a.artwork) && !isValidArtwork(existing.artwork)) existing.artwork = a.artwork;
+      }
+    }
+    
+    let filteredArtists = Array.from(uniqueArtistsMap.values());
+
+    for (const a of filteredArtists) {
       const simScore = calcArtistSimilarity(cleanQuery, a.name);
       const artistTracks = uniqueScoredTracks.filter(t => isArtistMatch(a.name, t.artist));
       const trackCount = artistTracks.length;
       const trackScoreSum = artistTracks.reduce((acc, trk) => acc + (trk.relevanceScore || 0), 0);
       const isFeatured = FEATURED_ARTISTS.some(f => normalizeArtistKey(f.name) === normalizeArtistKey(a.name));
+      const isExactMatch = normalizeArtistKey(a.name) === normalizeArtistKey(cleanQuery);
 
       let score = simScore;
-      score += trackCount * 3000; // Boost majeur pour les artistes ayant des titres dans la recherche
-      score += trackScoreSum * 5;
-      if (isFeatured) score += 4000;
-      if (a.nbFans) score += Math.min(3000, Math.round(a.nbFans / 1000));
-      if (isValidArtwork(a.artwork)) score += 500;
+      // L'artiste principal certifié (exact match) doit TOUJOURS sortir en #1
+      if (isExactMatch) {
+        score += 50000; // Massive boost for exact matches
+        if (a.nbFans) score += a.nbFans; // Break ties with actual fan count
+      } else {
+        score += trackCount * 3000;
+        score += trackScoreSum * 5;
+        if (isFeatured) score += 4000;
+        if (a.nbFans) score += Math.min(10000, Math.round(a.nbFans / 100)); // Cap fan boost for non-exact matches
+        if (isValidArtwork(a.artwork)) score += 500;
+      }
 
       a.dominanceScore = score;
     }
 
-    rawArtists.sort((a, b) => b.dominanceScore - a.dominanceScore);
+    filteredArtists.sort((a, b) => b.dominanceScore - a.dominanceScore);
+    const artists = filteredArtists.slice(0, 10);
 
-    const artists = rawArtists.slice(0, 8);
+    // 6. Albums formatés, dédoublonnés et classés avec scoring flou
+    const rawAlbums = [];
+    const seenAlbumKeys = new Set();
 
-    // 6. Albums formatés
-    const albums = [];
-    if (albumsData.results && Array.isArray(albumsData.results)) {
-      for (const alb of albumsData.results) {
-        if (alb.collectionName) {
-          albums.push({
-            id: alb.collectionId,
-            title: alb.collectionName,
-            artist: alb.artistName,
-            year: alb.releaseDate ? new Date(alb.releaseDate).getFullYear() : '',
-            artwork: getHdArtwork(alb.artworkUrl100),
-            trackCount: alb.trackCount || 0
+    // a) Albums Deezer
+    if (deezerAlbumData && Array.isArray(deezerAlbumData.data)) {
+      for (const alb of deezerAlbumData.data) {
+        if (!alb || !alb.title) continue;
+        const normTitle = (alb.title || '').toLowerCase().trim();
+        const normArt = (alb.artist?.name || '').toLowerCase().trim();
+        const key = `${normTitle}___${normArt}`;
+        if (!seenAlbumKeys.has(key)) {
+          seenAlbumKeys.add(key);
+          const score = calcFuzzySimilarity(cleanQuery, alb.title) + (calcFuzzySimilarity(cleanQuery, alb.artist?.name || '') / 2);
+          rawAlbums.push({
+            id: alb.id ? `dz_alb_${alb.id}` : key,
+            title: alb.title,
+            artist: alb.artist?.name || 'Artiste inconnu',
+            year: alb.release_date ? new Date(alb.release_date).getFullYear() : '',
+            artwork: alb.cover_xl || alb.cover_big || alb.cover_medium || '',
+            trackCount: alb.nb_tracks || 0,
+            score: score + 1000
           });
         }
       }
     }
 
+    // b) Albums iTunes
+    if (albumsData.results && Array.isArray(albumsData.results)) {
+      for (const alb of albumsData.results) {
+        if (!alb || !alb.collectionName) continue;
+        const normTitle = (alb.collectionName || '').toLowerCase().trim();
+        const normArt = (alb.artistName || '').toLowerCase().trim();
+        const key = `${normTitle}___${normArt}`;
+        if (!seenAlbumKeys.has(key)) {
+          seenAlbumKeys.add(key);
+          const score = calcFuzzySimilarity(cleanQuery, alb.collectionName) + (calcFuzzySimilarity(cleanQuery, alb.artistName || '') / 2);
+          rawAlbums.push({
+            id: alb.collectionId ? `it_alb_${alb.collectionId}` : key,
+            title: alb.collectionName,
+            artist: alb.artistName,
+            year: alb.releaseDate ? new Date(alb.releaseDate).getFullYear() : '',
+            artwork: getHdArtwork(alb.artworkUrl100),
+            trackCount: alb.trackCount || 0,
+            score: score
+          });
+        }
+      }
+    }
+
+    // c) Albums dérivés des morceaux trouvés si non présents
+    for (const t of uniqueScoredTracks) {
+      if (t.album && t.album.trim().length > 1) {
+        const normTitle = (t.album || '').toLowerCase().trim();
+        const normArt = (t.artist || '').toLowerCase().trim();
+        const key = `${normTitle}___${normArt}`;
+        if (!seenAlbumKeys.has(key)) {
+          seenAlbumKeys.add(key);
+          const score = calcFuzzySimilarity(cleanQuery, t.album) + (calcFuzzySimilarity(cleanQuery, t.artist || '') / 2);
+          rawAlbums.push({
+            id: `trk_alb_${key}`,
+            title: t.album,
+            artist: t.artist,
+            year: '',
+            artwork: t.thumbnail,
+            trackCount: 0,
+            score: score
+          });
+        }
+      }
+    }
+
+    rawAlbums.sort((a, b) => b.score - a.score);
+    const albums = rawAlbums.slice(0, 12);
+
     const finalResult = { 
       tracks: uniqueScoredTracks, 
-      artists: artists.slice(0, 8), 
-      albums: albums.slice(0, 8) 
+      artists: artists.slice(0, 10), 
+      albums: albums
     };
 
     memoryCache.set(cacheKey, finalResult);
@@ -966,57 +1198,93 @@ export async function getArtistDetails(artistName) {
     let dzArtist = null;
     let dzTopTracks = [];
     let dzAlbums = [];
+    let dzRelated = [];
+    let dzSearchTracks = [];
 
     try {
+      // 1a. Recherche exacte de l'artiste
       const dzArtistRes = await fetch(`/api/deezer-artist?q=${encodeURIComponent(cleanName)}`, {
         signal: AbortSignal.timeout(5000)
-      });
-      if (dzArtistRes.ok) {
+      }).catch(() => null);
+      
+      if (dzArtistRes && dzArtistRes.ok) {
         const dzArtistData = await dzArtistRes.json();
         if (dzArtistData && Array.isArray(dzArtistData.data) && dzArtistData.data.length > 0) {
           dzArtist = dzArtistData.data.find(a => matchFn(a.name)) || dzArtistData.data[0];
-
-          if (dzArtist && dzArtist.id) {
-            const [topRes, albRes] = await Promise.all([
-              fetch(`/api/deezer-artist-top?id=${dzArtist.id}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] })),
-              fetch(`/api/deezer-artist-albums?id=${dzArtist.id}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] }))
-            ]);
-            dzTopTracks = topRes?.data || [];
-            dzAlbums = albRes?.data || [];
-          }
         }
       }
-    } catch (e) {
-      console.warn('[MusicDataService] Erreur Deezer artist:', e);
-    }
 
-    // 2. Deezer Search direct pour trouver tous les morceaux de l'artiste
-    let dzSearchTracks = [];
-    try {
+      // 1b. Récupérer des pistes pour fallback
       const dzSearchRes = await fetch(`/api/deezer-search?q=artist:"${encodeURIComponent(cleanName)}"`, {
         signal: AbortSignal.timeout(5000)
-      });
-      if (dzSearchRes.ok) {
+      }).catch(() => null);
+      if (dzSearchRes && dzSearchRes.ok) {
         const data = await dzSearchRes.json();
-        if (data && Array.isArray(data.data)) {
-          dzSearchTracks = data.data;
-        }
+        if (data && Array.isArray(data.data)) dzSearchTracks = data.data;
       }
-    } catch (_) {}
 
-    // Si la recherche ciblée artiste n'a rien donné, recherche générale
-    if (dzSearchTracks.length === 0) {
-      try {
+      if (dzSearchTracks.length === 0) {
         const dzGeneralRes = await fetch(`/api/deezer-search?q=${encodeURIComponent(cleanName)}`, {
           signal: AbortSignal.timeout(5000)
-        });
-        if (dzGeneralRes.ok) {
+        }).catch(() => null);
+        if (dzGeneralRes && dzGeneralRes.ok) {
           const data = await dzGeneralRes.json();
-          if (data && Array.isArray(data.data)) {
-            dzSearchTracks = data.data;
+          if (data && Array.isArray(data.data)) dzSearchTracks = data.data;
+        }
+      }
+
+      // 1c. Resolver d'artiste Auto-Retry si aucun ID trouvé (Fallback ID)
+      if (!dzArtist && dzSearchTracks.length > 0) {
+        const fallbackTrack = dzSearchTracks.find(t => matchFn(t.artist.name)) || dzSearchTracks[0];
+        if (fallbackTrack && fallbackTrack.artist) {
+          dzArtist = fallbackTrack.artist;
+        }
+      }
+
+      // 1d. Récupérer Top, Albums, Related
+      if (dzArtist && dzArtist.id) {
+        const [topRes, albRes, relatedRes] = await Promise.all([
+          fetch(`/api/deezer-artist-top?id=${dzArtist.id}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] })),
+          fetch(`/api/deezer-artist-albums?id=${dzArtist.id}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] })),
+          fetch(`/api/deezer-artist-related?id=${dzArtist.id}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()).catch(() => ({ data: [] }))
+        ]);
+        dzTopTracks = topRes?.data || [];
+        dzAlbums = albRes?.data || [];
+        dzRelated = relatedRes?.data || [];
+      }
+
+      // 1e. Fallback Albums
+      if (dzAlbums.length === 0) {
+        const fallbackAlbRes = await fetch(`/api/deezer-search-album?q=${encodeURIComponent(cleanName)}`, {
+          signal: AbortSignal.timeout(5000)
+        }).catch(() => null);
+        if (fallbackAlbRes && fallbackAlbRes.ok) {
+          const albData = await fallbackAlbRes.json();
+          if (albData && Array.isArray(albData.data)) {
+            dzAlbums = albData.data.filter(a => matchFn(a.artist?.name || ''));
           }
         }
-      } catch (_) {}
+      }
+
+      // 1f. Fallback "Fans aiment aussi" (Artistes similaires)
+      if (dzRelated.length === 0 && dzSearchTracks.length > 0) {
+        const fallbackArtists = new Map();
+        for (const track of dzSearchTracks) {
+          if (track.artist && !matchFn(track.artist.name) && track.artist.id !== dzArtist?.id) {
+            fallbackArtists.set(track.artist.id, track.artist);
+          }
+          if (track.contributors) {
+            for (const contributor of track.contributors) {
+              if (contributor.id && !matchFn(contributor.name) && contributor.id !== dzArtist?.id) {
+                fallbackArtists.set(contributor.id, contributor);
+              }
+            }
+          }
+        }
+        dzRelated = Array.from(fallbackArtists.values()).slice(0, 10);
+      }
+    } catch (e) {
+      console.warn('[MusicDataService] Erreur Deezer artist & fallback:', e);
     }
 
     // 3. Requêtes iTunes sérialisées / limitées pour réduire la concurrence simultanée (Max 2 requêtes en même temps)
@@ -1071,7 +1339,7 @@ export async function getArtistDetails(artistName) {
         artist: d.artist?.name || dzArtist?.name || cleanName,
         album: d.album?.title || '',
         thumbnail: d.album?.cover_xl || d.album?.cover_big || dzArtist?.picture_xl || getArtistAvatar(cleanName),
-        duration: d.duration || 210,
+        duration: parseDurationToSeconds(d.duration, `${d.title}_${d.artist?.name || cleanName}_${d.id}`),
         previewUrl: d.preview,
         source: 'deezer',
         rank: d.rank || 600000
@@ -1088,7 +1356,7 @@ export async function getArtistDetails(artistName) {
         artist: d.artist.name,
         album: d.album?.title || '',
         thumbnail: d.album?.cover_xl || d.album?.cover_big || getArtistAvatar(cleanName),
-        duration: d.duration || 210,
+        duration: parseDurationToSeconds(d.duration, `${d.title}_${d.artist.name}_${d.id}`),
         previewUrl: d.preview,
         source: 'deezer',
         rank: d.rank || 500000
@@ -1113,7 +1381,7 @@ export async function getArtistDetails(artistName) {
       });
     }
 
-    // 5. Construction de la Discographie (Albums)
+    // 5. Construction de la Discographie (Albums, Singles, EPs)
     const albums = [];
     const seenAlbums = new Set();
 
@@ -1130,7 +1398,8 @@ export async function getArtistDetails(artistName) {
           year: alb.release_date ? new Date(alb.release_date).getFullYear() : '',
           artwork: alb.cover_xl || alb.cover_big || alb.cover_medium,
           genre: dzArtist?.genre || 'Rock / Pop',
-          trackCount: alb.nb_tracks || 0
+          trackCount: alb.nb_tracks || 0,
+          recordType: alb.record_type || 'album'
         });
       }
     }
@@ -1148,11 +1417,52 @@ export async function getArtistDetails(artistName) {
             year: a.releaseDate ? new Date(a.releaseDate).getFullYear() : '',
             artwork: getHdArtwork(a.artworkUrl100),
             genre: a.primaryGenreName || 'Musique',
-            trackCount: a.trackCount || 0
+            trackCount: a.trackCount || 0,
+            recordType: a.collectionType === 'Album' ? 'album' : 'single'
           });
         }
       }
     }
+
+    // Fallback de secours si moins de 2 albums trouvés
+    const mainAlbumsCount = albums.filter(a => a.recordType === 'album').length;
+    if (mainAlbumsCount < 2) {
+      try {
+        const fallbackAlbRes = await fetch(`/api/deezer-search-album?q=${encodeURIComponent(cleanName)}`, {
+          signal: AbortSignal.timeout(4000)
+        }).catch(() => null);
+        if (fallbackAlbRes && fallbackAlbRes.ok) {
+          const albData = await fallbackAlbRes.json();
+          if (albData && Array.isArray(albData.data)) {
+            for (const alb of albData.data) {
+              if (!alb.title || isJunkAlbum(alb.title)) continue;
+              const albNorm = alb.title.toLowerCase().trim();
+              if (!seenAlbums.has(albNorm)) {
+                seenAlbums.add(albNorm);
+                albums.push({
+                  id: alb.id ? `dz_alb_${alb.id}` : albNorm,
+                  deezerId: alb.id,
+                  title: alb.title,
+                  artist: alb.artist?.name || cleanName,
+                  year: alb.release_date ? new Date(alb.release_date).getFullYear() : '',
+                  artwork: alb.cover_xl || alb.cover_big || alb.cover_medium,
+                  genre: 'Musique',
+                  trackCount: alb.nb_tracks || 0,
+                  recordType: alb.record_type || 'album'
+                });
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Tri chronologique strict du plus récent au plus ancien (year décroissant)
+    albums.sort((a, b) => {
+      const yearA = parseInt(a.year) || 0;
+      const yearB = parseInt(b.year) || 0;
+      return yearB - yearA;
+    });
 
     // d) Si moins de 8 titres mais des albums trouvés, charger les morceaux des albums Deezer
     if (topTracks.length < 8 && albums.length > 0) {
@@ -1173,7 +1483,7 @@ export async function getArtistDetails(artistName) {
                   artist: trk.artist?.name || dzArtist?.name || cleanName,
                   album: alb.title,
                   thumbnail: alb.artwork,
-                  duration: trk.duration || 210,
+                  duration: parseDurationToSeconds(trk.duration, `${trk.title}_${cleanName}_${trk.id}`),
                   previewUrl: trk.preview,
                   source: 'deezer',
                   rank: trk.rank || 300000
@@ -1198,7 +1508,7 @@ export async function getArtistDetails(artistName) {
               artist: yt.artist || cleanName,
               album: 'Album YouTube',
               thumbnail: yt.thumbnail || getArtistAvatar(cleanName),
-              duration: yt.duration || 210,
+              duration: parseDurationToSeconds(yt.duration, `${yt.title}_${cleanName}_${yt.id || yt.videoId}`),
               source: 'youtube',
               rank: 350000
             });
@@ -1209,14 +1519,8 @@ export async function getArtistDetails(artistName) {
       }
     }
 
-    // Tri des topTracks : versions studio officielles en 1er, puis par popularité / rank
-    topTracks.sort((a, b) => {
-      const aLive = isLiveTrack(a.title);
-      const bLive = isLiveTrack(b.title);
-      if (!aLive && bLive) return -1;
-      if (aLive && !bLive) return 1;
-      return (b.rank || 0) - (a.rank || 0);
-    });
+    // Tri des topTracks : ordre strict de popularité décroissante
+    topTracks.sort((a, b) => (b.rank || 0) - (a.rank || 0));
 
     // Déduplication intelligente : si une version studio existe pour un titre, éliminer la version live doublon
     const studioTracksMap = new Map();
@@ -1381,6 +1685,12 @@ export async function getArtistDetails(artistName) {
       bio: officialVisuals?.bio || `Groupe / Artiste culte ${dzArtist?.name || cleanName}. Retrouvez l'ensemble de ses albums originaux, ses plus grands titres et ses enregistrements studio masterisés en haute fidélité.`,
       topTracks: finalTopTracks,
       albums,
+      relatedArtists: dzRelated.slice(0, 10).map(r => ({
+        id: r.id,
+        name: r.name,
+        picture: r.picture_xl || r.picture_large || r.picture_medium || r.picture,
+        nb_fan: r.nb_fan
+      })),
       monthlyListeners
     };
 
@@ -1420,7 +1730,7 @@ export async function getAlbumTracks(album, artistName) {
             artist: t.artist?.name || cleanArtist,
             album: album.title,
             thumbnail: album.artwork || t.album?.cover_xl || t.album?.cover_big || album.artwork,
-            duration: t.duration || 210,
+            duration: parseDurationToSeconds(t.duration, `${t.title}_${cleanArtist}_${t.id}`),
             previewUrl: t.preview,
             source: 'deezer',
             trackNumber: t.track_position || (idx + 1)
@@ -1591,80 +1901,148 @@ export const FEATURED_ARTISTS = [
 export const FRESH_NEW_RELEASES = [
   {
     videoId: 'eVli-tstM5E',
-    title: 'Espresso',
+    title: 'Short n\' Sweet',
+    mainTrackTitle: 'Espresso',
     artist: 'Sabrina Carpenter',
     album: 'Short n\' Sweet',
     thumbnail: 'https://i.ytimg.com/vi/eVli-tstM5E/hqdefault.jpg',
     duration: 175,
     source: 'youtube',
     year: '2024',
-    genre: 'Pop / Dance'
+    type: 'Album',
+    genre: 'Pop / Dance',
+    tracks: [
+      { videoId: 'eVli-tstM5E', title: 'Espresso', artist: 'Sabrina Carpenter', album: 'Short n\' Sweet', thumbnail: 'https://i.ytimg.com/vi/eVli-tstM5E/hqdefault.jpg', duration: 175 },
+      { videoId: 'c38r-h8564o', title: 'Please Please Please', artist: 'Sabrina Carpenter', album: 'Short n\' Sweet', thumbnail: 'https://i.ytimg.com/vi/c38r-h8564o/hqdefault.jpg', duration: 186 },
+      { videoId: 'Py80g4k6Tfs', title: 'Taste', artist: 'Sabrina Carpenter', album: 'Short n\' Sweet', thumbnail: 'https://i.ytimg.com/vi/Py80g4k6Tfs/hqdefault.jpg', duration: 157 },
+      { videoId: '0g8gVl8Lly8', title: 'Bed Chem', artist: 'Sabrina Carpenter', album: 'Short n\' Sweet', thumbnail: 'https://i.ytimg.com/vi/0g8gVl8Lly8/hqdefault.jpg', duration: 171 },
+      { videoId: 'e4G1aM-Y2Gg', title: 'Coincidence', artist: 'Sabrina Carpenter', album: 'Short n\' Sweet', thumbnail: 'https://i.ytimg.com/vi/e4G1aM-Y2Gg/hqdefault.jpg', duration: 164 }
+    ]
   },
   {
     videoId: 'd5g4u0R2oY0',
-    title: 'BIRDS OF A FEATHER',
+    title: 'HIT ME HARD AND SOFT',
+    mainTrackTitle: 'BIRDS OF A FEATHER',
     artist: 'Billie Eilish',
     album: 'HIT ME HARD AND SOFT',
     thumbnail: 'https://i.ytimg.com/vi/d5g4u0R2oY0/hqdefault.jpg',
     duration: 198,
     source: 'youtube',
     year: '2024',
-    genre: 'Alt Pop'
+    type: 'Album',
+    genre: 'Alt Pop',
+    tracks: [
+      { videoId: 'd5g4u0R2oY0', title: 'BIRDS OF A FEATHER', artist: 'Billie Eilish', album: 'HIT ME HARD AND SOFT', thumbnail: 'https://i.ytimg.com/vi/d5g4u0R2oY0/hqdefault.jpg', duration: 198 },
+      { videoId: 'QeR_b5fD46w', title: 'LUNCH', artist: 'Billie Eilish', album: 'HIT ME HARD AND SOFT', thumbnail: 'https://i.ytimg.com/vi/QeR_b5fD46w/hqdefault.jpg', duration: 180 },
+      { videoId: 'By_Jn65d1dY', title: 'CHIHIRO', artist: 'Billie Eilish', album: 'HIT ME HARD AND SOFT', thumbnail: 'https://i.ytimg.com/vi/By_Jn65d1dY/hqdefault.jpg', duration: 303 },
+      { videoId: 'qQ2T4qN4Oxg', title: 'WILDFLOWER', artist: 'Billie Eilish', album: 'HIT ME HARD AND SOFT', thumbnail: 'https://i.ytimg.com/vi/qQ2T4qN4Oxg/hqdefault.jpg', duration: 261 },
+      { videoId: 'eP8n3V8K0-0', title: 'BLUE', artist: 'Billie Eilish', album: 'HIT ME HARD AND SOFT', thumbnail: 'https://i.ytimg.com/vi/eP8n3V8K0-0/hqdefault.jpg', duration: 343 }
+    ]
   },
   {
-    videoId: 'H58vbez_m4E',
-    title: 'Not Like Us',
-    artist: 'Kendrick Lamar',
-    album: 'Not Like Us - Single',
-    thumbnail: 'https://i.ytimg.com/vi/H58vbez_m4E/hqdefault.jpg',
-    duration: 274,
+    videoId: 'ekr2nIex040',
+    title: 'APT.',
+    mainTrackTitle: 'APT.',
+    artist: 'ROSÉ & Bruno Mars',
+    album: 'rosie - Single',
+    thumbnail: 'https://i.ytimg.com/vi/ekr2nIex040/hqdefault.jpg',
+    duration: 169,
     source: 'youtube',
     year: '2024',
-    genre: 'Hip-Hop / West Coast'
+    type: 'Single',
+    genre: 'Pop Rock',
+    tracks: [
+      { videoId: 'ekr2nIex040', title: 'APT.', artist: 'ROSÉ & Bruno Mars', album: 'rosie - Single', thumbnail: 'https://i.ytimg.com/vi/ekr2nIex040/hqdefault.jpg', duration: 169 }
+    ]
   },
   {
     videoId: 'kPa7bsKwL-c',
     title: 'Die With A Smile',
+    mainTrackTitle: 'Die With A Smile',
     artist: 'Lady Gaga & Bruno Mars',
     album: 'Die With A Smile - Single',
     thumbnail: 'https://i.ytimg.com/vi/kPa7bsKwL-c/hqdefault.jpg',
     duration: 251,
     source: 'youtube',
     year: '2024',
-    genre: 'Pop / Soul'
+    type: 'Single',
+    genre: 'Pop / Soul',
+    tracks: [
+      { videoId: 'kPa7bsKwL-c', title: 'Die With A Smile', artist: 'Lady Gaga & Bruno Mars', album: 'Die With A Smile - Single', thumbnail: 'https://i.ytimg.com/vi/kPa7bsKwL-c/hqdefault.jpg', duration: 251 }
+    ]
   },
   {
     videoId: 'wNyk_7pPMkE',
-    title: '360',
+    title: 'BRAT',
+    mainTrackTitle: '360',
     artist: 'Charli xcx',
     album: 'BRAT',
     thumbnail: 'https://i.ytimg.com/vi/wNyk_7pPMkE/hqdefault.jpg',
     duration: 133,
     source: 'youtube',
     year: '2024',
-    genre: 'Electropop / Club'
+    type: 'Album',
+    genre: 'Electropop / Club',
+    tracks: [
+      { videoId: 'wNyk_7pPMkE', title: '360', artist: 'Charli xcx', album: 'BRAT', thumbnail: 'https://i.ytimg.com/vi/wNyk_7pPMkE/hqdefault.jpg', duration: 133 },
+      { videoId: 'r53S-bM0-b4', title: 'Von dutch', artist: 'Charli xcx', album: 'BRAT', thumbnail: 'https://i.ytimg.com/vi/r53S-bM0-b4/hqdefault.jpg', duration: 164 },
+      { videoId: 'W8Wb2WpS1tE', title: 'Apple', artist: 'Charli xcx', album: 'BRAT', thumbnail: 'https://i.ytimg.com/vi/W8Wb2WpS1tE/hqdefault.jpg', duration: 151 },
+      { videoId: 'yB6R8K1wR4k', title: 'Girl, so confusing', artist: 'Charli xcx ft. Lorde', album: 'BRAT', thumbnail: 'https://i.ytimg.com/vi/yB6R8K1wR4k/hqdefault.jpg', duration: 205 },
+      { videoId: 'r0wK1K1-a4E', title: 'Club classics', artist: 'Charli xcx', album: 'BRAT', thumbnail: 'https://i.ytimg.com/vi/r0wK1K1-a4E/hqdefault.jpg', duration: 153 }
+    ]
   },
   {
-    videoId: '1-SIG-r8318',
-    title: 'Good Luck, Babe!',
-    artist: 'Chappell Roan',
-    album: 'Good Luck, Babe! - Single',
-    thumbnail: 'https://i.ytimg.com/vi/1-SIG-r8318/hqdefault.jpg',
-    duration: 218,
+    videoId: 'H58vbez_m4E',
+    title: 'Not Like Us',
+    mainTrackTitle: 'Not Like Us',
+    artist: 'Kendrick Lamar',
+    album: 'Not Like Us - Single',
+    thumbnail: 'https://i.ytimg.com/vi/H58vbez_m4E/hqdefault.jpg',
+    duration: 274,
     source: 'youtube',
     year: '2024',
-    genre: 'Synthpop'
+    type: 'Single',
+    genre: 'Hip-Hop / West Coast',
+    tracks: [
+      { videoId: 'H58vbez_m4E', title: 'Not Like Us', artist: 'Kendrick Lamar', album: 'Not Like Us - Single', thumbnail: 'https://i.ytimg.com/vi/H58vbez_m4E/hqdefault.jpg', duration: 274 }
+    ]
+  },
+  {
+    videoId: 'bg47t6522c0',
+    title: 'CHROMAKOPIA',
+    mainTrackTitle: 'Noid',
+    artist: 'Tyler, The Creator',
+    album: 'CHROMAKOPIA',
+    thumbnail: 'https://i.ytimg.com/vi/bg47t6522c0/hqdefault.jpg',
+    duration: 284,
+    source: 'youtube',
+    year: '2024',
+    type: 'Album',
+    genre: 'Alternative Rap',
+    tracks: [
+      { videoId: 'bg47t6522c0', title: 'Noid', artist: 'Tyler, The Creator', album: 'CHROMAKOPIA', thumbnail: 'https://i.ytimg.com/vi/bg47t6522c0/hqdefault.jpg', duration: 284 },
+      { videoId: 'R9Y8o3bB0c4', title: 'St. Chroma', artist: 'Tyler, The Creator ft. Daniel Caesar', album: 'CHROMAKOPIA', thumbnail: 'https://i.ytimg.com/vi/R9Y8o3bB0c4/hqdefault.jpg', duration: 197 },
+      { videoId: 'K9y0W1Y2b4k', title: 'Sticky', artist: 'Tyler, The Creator ft. Glorilla, Sexyy Red & Lil Wayne', album: 'CHROMAKOPIA', thumbnail: 'https://i.ytimg.com/vi/K9y0W1Y2b4k/hqdefault.jpg', duration: 255 },
+      { videoId: 'L8R89bW1z4k', title: 'Darling, I', artist: 'Tyler, The Creator ft. Teezo Touchdown', album: 'CHROMAKOPIA', thumbnail: 'https://i.ytimg.com/vi/L8R89bW1z4k/hqdefault.jpg', duration: 253 }
+    ]
   },
   {
     videoId: 'MLlSSJ0z7xM',
-    title: 'Dancing In The Flames',
+    title: 'Hurry Up Tomorrow',
+    mainTrackTitle: 'Dancing In The Flames',
     artist: 'The Weeknd',
     album: 'Hurry Up Tomorrow',
     thumbnail: 'https://i.ytimg.com/vi/MLlSSJ0z7xM/hqdefault.jpg',
     duration: 220,
     source: 'youtube',
     year: '2024',
-    genre: 'Synthwave'
+    type: 'Album',
+    genre: 'Synthwave / Pop',
+    tracks: [
+      { videoId: 'MLlSSJ0z7xM', title: 'Dancing In The Flames', artist: 'The Weeknd', album: 'Hurry Up Tomorrow', thumbnail: 'https://i.ytimg.com/vi/MLlSSJ0z7xM/hqdefault.jpg', duration: 220 },
+      { videoId: '5Z9zV0R1c40', title: 'Timeless', artist: 'The Weeknd & Playboi Carti', album: 'Hurry Up Tomorrow', thumbnail: 'https://i.ytimg.com/vi/5Z9zV0R1c40/hqdefault.jpg', duration: 256 },
+      { videoId: '8y1-k2k3l4m', title: 'São Paulo', artist: 'The Weeknd & Anitta', album: 'Hurry Up Tomorrow', thumbnail: 'https://i.ytimg.com/vi/8y1-k2k3l4m/hqdefault.jpg', duration: 195 }
+    ]
   }
 ];
 
@@ -1897,6 +2275,142 @@ export const DECADE_PLAYLISTS = [
   }
 ];
 
+export const GENRE_PLAYLISTS = [
+  {
+    id: 'genre-pop',
+    title: 'Pop & mainstream',
+    genre: 'Pop',
+    description: 'Les plus grands tubes pop du moment et incontournables mondiaux',
+    color: 'from-pink-600 to-purple-800',
+    cover: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=80',
+    tracks: [
+      { videoId: 'eVli-tstM5E', title: 'Espresso', artist: 'Sabrina Carpenter', album: 'Short n\' Sweet', thumbnail: 'https://i.ytimg.com/vi/eVli-tstM5E/hqdefault.jpg', duration: 175, genre: 'Pop' },
+      { videoId: 'd5g4u0R2oY0', title: 'BIRDS OF A FEATHER', artist: 'Billie Eilish', album: 'HIT ME HARD AND SOFT', thumbnail: 'https://i.ytimg.com/vi/d5g4u0R2oY0/hqdefault.jpg', duration: 198, genre: 'Pop' },
+      { videoId: 'kPa7bsKwL-c', title: 'Die With A Smile', artist: 'Lady Gaga & Bruno Mars', album: 'Die With A Smile', thumbnail: 'https://i.ytimg.com/vi/kPa7bsKwL-c/hqdefault.jpg', duration: 251, genre: 'Pop' },
+      { videoId: '1-SIG-r8318', title: 'Good Luck, Babe!', artist: 'Chappell Roan', album: 'Good Luck, Babe!', thumbnail: 'https://i.ytimg.com/vi/1-SIG-r8318/hqdefault.jpg', duration: 218, genre: 'Pop' },
+      { videoId: 'ic8j13gRBSY', title: 'Cruel Summer', artist: 'Taylor Swift', album: 'Lover', thumbnail: 'https://i.ytimg.com/vi/ic8j13gRBSY/hqdefault.jpg', duration: 178, genre: 'Pop' }
+    ]
+  },
+  {
+    id: 'genre-rap',
+    title: 'Rap & Hip-Hop',
+    genre: 'Rap/Hip-Hop',
+    description: 'Bangers US et FR, punchlines et productions lourdes',
+    color: 'from-amber-600 to-orange-800',
+    cover: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=800&auto=format&fit=crop&q=80',
+    tracks: [
+      { videoId: 'H58vbez_m4E', title: 'Not Like Us', artist: 'Kendrick Lamar', album: 'Not Like Us', thumbnail: 'https://i.ytimg.com/vi/H58vbez_m4E/hqdefault.jpg', duration: 274, genre: 'Rap' },
+      { videoId: '6ONRf7h3Mdk', title: 'SICKO MODE', artist: 'Travis Scott', album: 'ASTROWORLD', thumbnail: 'https://i.ytimg.com/vi/6ONRf7h3Mdk/hqdefault.jpg', duration: 312, genre: 'Rap' },
+      { videoId: 'BtyHYIHEaDA', title: 'Au DD', artist: 'PNL', album: 'Deux Frères', thumbnail: 'https://i.ytimg.com/vi/BtyHYIHEaDA/hqdefault.jpg', duration: 240, genre: 'Rap' },
+      { videoId: '_CL6n0FJZpk', title: 'Still D.R.E.', artist: 'Dr. Dre ft. Snoop Dogg', album: '2001', thumbnail: 'https://i.ytimg.com/vi/_CL6n0FJZpk/hqdefault.jpg', duration: 271, genre: 'Rap' },
+      { videoId: 'tvTRZJ-4EyI', title: 'HUMBLE.', artist: 'Kendrick Lamar', album: 'DAMN.', thumbnail: 'https://i.ytimg.com/vi/tvTRZJ-4EyI/hqdefault.jpg', duration: 177, genre: 'Rap' }
+    ]
+  },
+  {
+    id: 'genre-rock',
+    title: 'Rock & Alternatives',
+    genre: 'Rock',
+    description: 'Riffs légendaires, solos de guitare et anthems rock',
+    color: 'from-red-600 to-rose-900',
+    cover: 'https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=800&auto=format&fit=crop&q=80',
+    tracks: [
+      { videoId: 'fJ9rUzIMcZQ', title: 'Bohemian Rhapsody', artist: 'Queen', album: 'A Night at the Opera', thumbnail: 'https://i.ytimg.com/vi/fJ9rUzIMcZQ/hqdefault.jpg', duration: 354, genre: 'Rock' },
+      { videoId: 'kXYiU_JCYtU', title: 'Numb', artist: 'Linkin Park', album: 'Meteora', thumbnail: 'https://i.ytimg.com/vi/kXYiU_JCYtU/hqdefault.jpg', duration: 187, genre: 'Rock' },
+      { videoId: 'hTWKbfoiklM', title: 'Smells Like Teen Spirit', artist: 'Nirvana', album: 'Nevermind', thumbnail: 'https://i.ytimg.com/vi/hTWKbfoiklM/hqdefault.jpg', duration: 301, genre: 'Rock' },
+      { videoId: '6hzrDeceEKc', title: 'Wonderwall', artist: 'Oasis', album: '(What\'s the Story) Morning Glory?', thumbnail: 'https://i.ytimg.com/vi/6hzrDeceEKc/hqdefault.jpg', duration: 258, genre: 'Rock' },
+      { videoId: 'gEPmA31yH6w', title: 'Highway to Hell', artist: 'AC/DC', album: 'Highway to Hell', thumbnail: 'https://i.ytimg.com/vi/gEPmA31yH6w/hqdefault.jpg', duration: 208, genre: 'Rock' }
+    ]
+  },
+  {
+    id: 'genre-electro',
+    title: 'Electro & Club',
+    genre: 'Electro',
+    description: 'French touch, synthwave et hymnes des plus grands festivals',
+    color: 'from-cyan-600 to-blue-900',
+    cover: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800&auto=format&fit=crop&q=80',
+    tracks: [
+      { videoId: '5NV6Rdv1a3I', title: 'Get Lucky', artist: 'Daft Punk ft. Pharrell Williams', album: 'Random Access Memories', thumbnail: 'https://i.ytimg.com/vi/5NV6Rdv1a3I/hqdefault.jpg', duration: 248, genre: 'Electro' },
+      { videoId: 'FGBhQbmPwH8', title: 'One More Time', artist: 'Daft Punk', album: 'Discovery', thumbnail: 'https://i.ytimg.com/vi/FGBhQbmPwH8/hqdefault.jpg', duration: 320, genre: 'Electro' },
+      { videoId: 'IcrbM1l_BoI', title: 'Wake Me Up', artist: 'Avicii', album: 'True', thumbnail: 'https://i.ytimg.com/vi/IcrbM1l_BoI/hqdefault.jpg', duration: 247, genre: 'Electro' },
+      { videoId: 'wNyk_7pPMkE', title: '360', artist: 'Charli xcx', album: 'BRAT', thumbnail: 'https://i.ytimg.com/vi/wNyk_7pPMkE/hqdefault.jpg', duration: 133, genre: 'Electro' },
+      { videoId: 'JRfuAukYTKg', title: 'Titanium', artist: 'David Guetta ft. Sia', album: 'Nothing but the Beat', thumbnail: 'https://i.ytimg.com/vi/JRfuAukYTKg/hqdefault.jpg', duration: 245, genre: 'Electro' }
+    ]
+  },
+  {
+    id: 'genre-chill',
+    title: 'Chill & Acoustic',
+    genre: 'Chill',
+    description: 'Titres apaisants, sessions acoustiques et ambiances de détente',
+    color: 'from-emerald-600 to-teal-900',
+    cover: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&auto=format&fit=crop&q=80',
+    tracks: [
+      { videoId: 'a7fzkqL_V8o', title: 'Too Sweet', artist: 'Hozier', album: 'Unheard', thumbnail: 'https://i.ytimg.com/vi/a7fzkqL_V8o/hqdefault.jpg', duration: 251, genre: 'Chill' },
+      { videoId: 'TdrL3QxjyVw', title: 'Summertime Sadness', artist: 'Lana Del Rey', album: 'Born to Die', thumbnail: 'https://i.ytimg.com/vi/TdrL3QxjyVw/hqdefault.jpg', duration: 265, genre: 'Chill' },
+      { videoId: 'JGwWNGJdvx8', title: 'Shape of You', artist: 'Ed Sheeran', album: '÷', thumbnail: 'https://i.ytimg.com/vi/JGwWNGJdvx8/hqdefault.jpg', duration: 233, genre: 'Chill' },
+      { videoId: 'nlcIKh6sBtc', title: 'Royals', artist: 'Lorde', album: 'Pure Heroine', thumbnail: 'https://i.ytimg.com/vi/nlcIKh6sBtc/hqdefault.jpg', duration: 190, genre: 'Chill' }
+    ]
+  },
+  {
+    id: 'genre-sport',
+    title: 'Sport & Workout',
+    genre: 'Sport',
+    description: 'Rythme élevé et énergie pure pour vos séances d\'entraînement',
+    color: 'from-violet-600 to-indigo-900',
+    cover: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&auto=format&fit=crop&q=80',
+    tracks: [
+      { videoId: '_Yhyp-_hX2s', title: 'Lose Yourself', artist: 'Eminem', album: '8 Mile', thumbnail: 'https://i.ytimg.com/vi/_Yhyp-_hX2s/hqdefault.jpg', duration: 326, genre: 'Sport' },
+      { videoId: 'btPJPFnesV4', title: 'Eye of the Tiger', artist: 'Survivor', album: 'Eye of the Tiger', thumbnail: 'https://i.ytimg.com/vi/btPJPFnesV4/hqdefault.jpg', duration: 245, genre: 'Sport' },
+      { videoId: 'PsO6ZnUZI0g', title: 'Stronger', artist: 'Kanye West', album: 'Graduation', thumbnail: 'https://i.ytimg.com/vi/PsO6ZnUZI0g/hqdefault.jpg', duration: 312, genre: 'Sport' },
+      { videoId: 'wmin5WkOuPw', title: 'Firestarter', artist: 'The Prodigy', album: 'The Fat of the Land', thumbnail: 'https://i.ytimg.com/vi/wmin5WkOuPw/hqdefault.jpg', duration: 285, genre: 'Sport' }
+    ]
+  }
+];
+
+export const SPOTIFY_TOP_50_GLOBAL = [
+  { rank: 1, videoId: 'kPa7bsKwL-c', title: 'Die With A Smile', artist: 'Lady Gaga & Bruno Mars', album: 'Die With A Smile', thumbnail: 'https://i.ytimg.com/vi/kPa7bsKwL-c/hqdefault.jpg', duration: 251, plays: '1.4B écoutes', popularity: 99 },
+  { rank: 2, videoId: 'eVli-tstM5E', title: 'Espresso', artist: 'Sabrina Carpenter', album: 'Short n\' Sweet', thumbnail: 'https://i.ytimg.com/vi/eVli-tstM5E/hqdefault.jpg', duration: 175, plays: '1.2B écoutes', popularity: 98 },
+  { rank: 3, videoId: 'd5g4u0R2oY0', title: 'BIRDS OF A FEATHER', artist: 'Billie Eilish', album: 'HIT ME HARD AND SOFT', thumbnail: 'https://i.ytimg.com/vi/d5g4u0R2oY0/hqdefault.jpg', duration: 198, plays: '1.1B écoutes', popularity: 98 },
+  { rank: 4, videoId: 'H58vbez_m4E', title: 'Not Like Us', artist: 'Kendrick Lamar', album: 'Not Like Us', thumbnail: 'https://i.ytimg.com/vi/H58vbez_m4E/hqdefault.jpg', duration: 274, plays: '980M écoutes', popularity: 97 },
+  { rank: 5, videoId: 'ekr2nIex040', title: 'APT.', artist: 'ROSÉ & Bruno Mars', album: 'rosie', thumbnail: 'https://i.ytimg.com/vi/ekr2nIex040/hqdefault.jpg', duration: 169, plays: '940M écoutes', popularity: 97 },
+  { rank: 6, videoId: '1-SIG-r8318', title: 'Good Luck, Babe!', artist: 'Chappell Roan', album: 'Good Luck, Babe!', thumbnail: 'https://i.ytimg.com/vi/1-SIG-r8318/hqdefault.jpg', duration: 218, plays: '890M écoutes', popularity: 96 },
+  { rank: 7, videoId: 'wNyk_7pPMkE', title: '360', artist: 'Charli xcx', album: 'BRAT', thumbnail: 'https://i.ytimg.com/vi/wNyk_7pPMkE/hqdefault.jpg', duration: 133, plays: '820M écoutes', popularity: 95 },
+  { rank: 8, videoId: '4NRXx6U8ABQ', title: 'Blinding Lights', artist: 'The Weeknd', album: 'After Hours', thumbnail: 'https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg', duration: 200, plays: '4.2B écoutes', popularity: 99 },
+  { rank: 9, videoId: 'c38r-h8564o', title: 'Please Please Please', artist: 'Sabrina Carpenter', album: 'Short n\' Sweet', thumbnail: 'https://i.ytimg.com/vi/c38r-h8564o/hqdefault.jpg', duration: 186, plays: '780M écoutes', popularity: 94 },
+  { rank: 10, videoId: 'Oa_RSwwpPaA', title: 'Beautiful Things', artist: 'Benson Boone', album: 'Fireworks & Rollerblades', thumbnail: 'https://i.ytimg.com/vi/Oa_RSwwpPaA/hqdefault.jpg', duration: 180, plays: '1.3B écoutes', popularity: 96 },
+  { rank: 11, videoId: 'ic8j13gRBSY', title: 'Cruel Summer', artist: 'Taylor Swift', album: 'Lover', thumbnail: 'https://i.ytimg.com/vi/ic8j13gRBSY/hqdefault.jpg', duration: 178, plays: '2.1B écoutes', popularity: 95 },
+  { rank: 12, videoId: 'a7fzkqL_V8o', title: 'Too Sweet', artist: 'Hozier', album: 'Unheard', thumbnail: 'https://i.ytimg.com/vi/a7fzkqL_V8o/hqdefault.jpg', duration: 251, plays: '870M écoutes', popularity: 93 },
+  { rank: 13, videoId: 'GZ3zL7ApV_8', title: 'Lose Control', artist: 'Teddy Swims', album: 'I\'ve Tried Everything But Therapy', thumbnail: 'https://i.ytimg.com/vi/GZ3zL7ApV_8/hqdefault.jpg', duration: 210, plays: '1.1B écoutes', popularity: 94 },
+  { rank: 14, videoId: 'MLlSSJ0z7xM', title: 'Dancing In The Flames', artist: 'The Weeknd', album: 'Hurry Up Tomorrow', thumbnail: 'https://i.ytimg.com/vi/MLlSSJ0z7xM/hqdefault.jpg', duration: 220, plays: '650M écoutes', popularity: 92 },
+  { rank: 15, videoId: 'QeR_b5fD46w', title: 'LUNCH', artist: 'Billie Eilish', album: 'HIT ME HARD AND SOFT', thumbnail: 'https://i.ytimg.com/vi/QeR_b5fD46w/hqdefault.jpg', duration: 180, plays: '710M écoutes', popularity: 93 },
+  { rank: 16, videoId: 'H5v3kku4y6Q', title: 'As It Was', artist: 'Harry Styles', album: 'Harry\'s House', thumbnail: 'https://i.ytimg.com/vi/H5v3kku4y6Q/hqdefault.jpg', duration: 167, plays: '3.3B écoutes', popularity: 96 },
+  { rank: 17, videoId: 'G7KNmW9a75Y', title: 'Flowers', artist: 'Miley Cyrus', album: 'Endless Summer Vacation', thumbnail: 'https://i.ytimg.com/vi/G7KNmW9a75Y/hqdefault.jpg', duration: 200, plays: '2.2B écoutes', popularity: 95 },
+  { rank: 18, videoId: 'ZIfF8T6kY7c', title: 'vampire', artist: 'Olivia Rodrigo', album: 'GUTS', thumbnail: 'https://i.ytimg.com/vi/ZIfF8T6kY7c/hqdefault.jpg', duration: 219, plays: '1.2B écoutes', popularity: 92 },
+  { rank: 19, videoId: 'MSRcC62y338', title: 'Kill Bill', artist: 'SZA', album: 'SOS', thumbnail: 'https://i.ytimg.com/vi/MSRcC62y338/hqdefault.jpg', duration: 153, plays: '1.8B écoutes', popularity: 94 },
+  { rank: 20, videoId: 'c5pE-kS-2S0', title: 'MILLION DOLLAR BABY', artist: 'Tommy Richman', album: 'MILLION DOLLAR BABY', thumbnail: 'https://i.ytimg.com/vi/c5pE-kS-2S0/hqdefault.jpg', duration: 155, plays: '810M écoutes', popularity: 91 }
+];
+
+export const SPOTIFY_TOP_50_FRANCE = [
+  { rank: 1, videoId: 'bF2_N1l-n3k', title: 'SPIDER', artist: 'GIMS ft. Dystinct', album: 'SPIDER', thumbnail: 'https://i.ytimg.com/vi/bF2_N1l-n3k/hqdefault.jpg', duration: 188, plays: '140M écoutes', popularity: 97 },
+  { rank: 2, videoId: 'BtyHYIHEaDA', title: 'Au DD', artist: 'PNL', album: 'Deux Frères', thumbnail: 'https://i.ytimg.com/vi/BtyHYIHEaDA/hqdefault.jpg', duration: 240, plays: '390M écoutes', popularity: 98 },
+  { rank: 3, videoId: 'oiKj0Z_Xnjc', title: 'Papaoutai', artist: 'Stromae', album: 'Racine Carrée', thumbnail: 'https://i.ytimg.com/vi/oiKj0Z_Xnjc/hqdefault.jpg', duration: 232, plays: '750M écoutes', popularity: 96 },
+  { rank: 4, videoId: 'kPa7bsKwL-c', title: 'Die With A Smile', artist: 'Lady Gaga & Bruno Mars', album: 'Die With A Smile', thumbnail: 'https://i.ytimg.com/vi/kPa7bsKwL-c/hqdefault.jpg', duration: 251, plays: '1.4B écoutes', popularity: 99 },
+  { rank: 5, videoId: 'eVli-tstM5E', title: 'Espresso', artist: 'Sabrina Carpenter', album: 'Short n\' Sweet', thumbnail: 'https://i.ytimg.com/vi/eVli-tstM5E/hqdefault.jpg', duration: 175, plays: '1.2B écoutes', popularity: 98 },
+  { rank: 6, videoId: 'pssIGfvlP40', title: 'Basique', artist: 'Orelsan', album: 'La fête est finie', thumbnail: 'https://i.ytimg.com/vi/pssIGfvlP40/hqdefault.jpg', duration: 164, plays: '190M écoutes', popularity: 93 },
+  { rank: 7, videoId: 'Hi7Rx3En7-w', title: 'Balance ton quoi', artist: 'Angèle', album: 'Brol', thumbnail: 'https://i.ytimg.com/vi/Hi7Rx3En7-w/hqdefault.jpg', duration: 189, plays: '220M écoutes', popularity: 94 },
+  { rank: 8, videoId: 'uU3xL0nE5y8', title: 'Caroline', artist: 'MC Solaar', album: 'Qui sème le vent', thumbnail: 'https://i.ytimg.com/vi/uU3xL0nE5y8/hqdefault.jpg', duration: 282, plays: '95M écoutes', popularity: 91 },
+  { rank: 9, videoId: 'b00Lw727mB0', title: 'Petit frère', artist: 'IAM', album: 'L\'école du micro d\'argent', thumbnail: 'https://i.ytimg.com/vi/b00Lw727mB0/hqdefault.jpg', duration: 284, plays: '110M écoutes', popularity: 92 },
+  { rank: 10, videoId: '5NV6Rdv1a3I', title: 'Get Lucky', artist: 'Daft Punk', album: 'Random Access Memories', thumbnail: 'https://i.ytimg.com/vi/5NV6Rdv1a3I/hqdefault.jpg', duration: 248, plays: '1.2B écoutes', popularity: 96 },
+  { rank: 11, videoId: 'v1pQk055e_Q', title: 'L\'aventurier', artist: 'Indochine', album: 'L\'aventurier', thumbnail: 'https://i.ytimg.com/vi/v1pQk055e_Q/hqdefault.jpg', duration: 229, plays: '85M écoutes', popularity: 90 },
+  { rank: 12, videoId: 'vY6R9nQj5Gg', title: 'Un autre monde', artist: 'Téléphone', album: 'Un autre monde', thumbnail: 'https://i.ytimg.com/vi/vY6R9nQj5Gg/hqdefault.jpg', duration: 270, plays: '90M écoutes', popularity: 90 },
+  { rank: 13, videoId: 'd5g4u0R2oY0', title: 'BIRDS OF A FEATHER', artist: 'Billie Eilish', album: 'HIT ME HARD AND SOFT', thumbnail: 'https://i.ytimg.com/vi/d5g4u0R2oY0/hqdefault.jpg', duration: 198, plays: '1.1B écoutes', popularity: 98 },
+  { rank: 14, videoId: 'H58vbez_m4E', title: 'Not Like Us', artist: 'Kendrick Lamar', album: 'Not Like Us', thumbnail: 'https://i.ytimg.com/vi/H58vbez_m4E/hqdefault.jpg', duration: 274, plays: '980M écoutes', popularity: 97 },
+  { rank: 15, videoId: '4GA2YI5aECA', title: 'La Tribu de Dana', artist: 'Manau', album: 'Panique celtique', thumbnail: 'https://i.ytimg.com/vi/4GA2YI5aECA/hqdefault.jpg', duration: 287, plays: '75M écoutes', popularity: 88 }
+];
+
+export function getSpotifyTop50(chart = 'global') {
+  return chart === 'france' ? SPOTIFY_TOP_50_FRANCE : SPOTIFY_TOP_50_GLOBAL;
+}
+
 export const TRENDING_TRACKS = [
   ...FRESH_NEW_RELEASES,
   {
@@ -2004,3 +2518,144 @@ export function getArtistAvatar(artistName) {
   const index = Math.abs(sum) % musicBackdrops.length;
   return musicBackdrops[index];
 }
+
+/**
+ * Recherche locale hors-ligne ultra-rapide basée sur IndexedDB (Dexie).
+ * Interroge les morceaux téléchargés (offlineTracks), les favoris (likes) et l'historique (tracks).
+ * Applique le fuzzy matching et la tolérance aux fautes de frappe.
+ */
+export async function searchOfflineDexie(query, audioMode = 'studio') {
+  if (!query || !query.trim()) {
+    return { tracks: [], artists: [], albums: [], isOffline: true };
+  }
+  const clean = query.trim();
+  const tracksMap = new Map();
+
+  try {
+    // 1. Charger depuis db.offlineTracks (morceaux téléchargés complets avec audio)
+    if (db && db.offlineTracks) {
+      const downloaded = await db.offlineTracks.toArray().catch(() => []);
+      for (const rawT of downloaded) {
+        if (!rawT) continue;
+        const t = classifyTrack(rawT) || rawT;
+        const key = t.videoId || t.id || `${t.title}_${t.artist}`;
+        tracksMap.set(key, {
+          ...t,
+          id: t.videoId || t.id || key,
+          videoId: t.videoId || t.id || key,
+          isOfflineDownloaded: true,
+          isOffline: true
+        });
+      }
+    }
+
+    // 2. Charger depuis db.likes (favoris)
+    if (db && db.likes) {
+      const liked = await db.likes.toArray().catch(() => []);
+      for (const rawT of liked) {
+        if (!rawT) continue;
+        const t = classifyTrack(rawT) || rawT;
+        const key = t.videoId || t.id || `${t.title}_${t.artist}`;
+        if (!tracksMap.has(key)) {
+          tracksMap.set(key, {
+            ...t,
+            id: t.videoId || t.id || key,
+            videoId: t.videoId || t.id || key,
+            isLiked: true,
+            isOffline: true
+          });
+        }
+      }
+    }
+
+    // 3. Charger depuis db.tracks (historique et cache local)
+    if (db && db.tracks) {
+      const history = await db.tracks.toArray().catch(() => []);
+      for (const rawT of history) {
+        if (!rawT) continue;
+        const t = classifyTrack(rawT) || rawT;
+        const key = t.videoId || t.id || `${t.title}_${t.artist}`;
+        if (!tracksMap.has(key)) {
+          tracksMap.set(key, {
+            ...t,
+            id: t.videoId || t.id || key,
+            videoId: t.videoId || t.id || key,
+            isOffline: true
+          });
+        }
+      }
+    }
+
+    const allLocalTracks = Array.from(tracksMap.values());
+    const scoredTracks = [];
+
+    for (const t of allLocalTracks) {
+      const titleSim = calcFuzzySimilarity(clean, t.title || '');
+      const artistSim = calcFuzzySimilarity(clean, t.artist || '');
+      const albumSim = calcFuzzySimilarity(clean, t.album || '');
+
+      let score = (titleSim * 2) + (artistSim * 1.5) + albumSim;
+      if (t.isOfflineDownloaded) score += 800; // Priorité absolue aux fichiers audio stockés localement
+      if (t.isLiked) score += 300;
+
+      // Filtre de pertinence minimale
+      if (score > 150) {
+        scoredTracks.push({ ...t, relevanceScore: score });
+      }
+    }
+
+    const sortedLocalTracks = sortTracksByPriority(scoredTracks, audioMode);
+
+    // Extraire les artistes et albums locaux
+    const artistsMap = new Map();
+    const albumsMap = new Map();
+
+    for (const t of scoredTracks) {
+      if (t.artist && t.artist !== 'Artiste inconnu') {
+        const artName = getMainArtistName(t.artist);
+        const artKey = normalizeArtistKey(artName);
+        if (artKey) {
+          if (!artistsMap.has(artKey)) {
+            artistsMap.set(artKey, {
+              id: `offline_art_${artKey}`,
+              name: artName,
+              avatar: t.thumbnail || getArtistAvatar(artName),
+              trackCount: 1,
+              isOffline: true
+            });
+          } else {
+            artistsMap.get(artKey).trackCount++;
+          }
+        }
+      }
+
+      if (t.album && t.album.trim().length > 1) {
+        const albName = t.album.trim();
+        const albKey = `${albName.toLowerCase()}___${(t.artist || '').toLowerCase()}`;
+        if (!albumsMap.has(albKey)) {
+          albumsMap.set(albKey, {
+            id: `offline_alb_${albKey}`,
+            title: albName,
+            artist: t.artist || 'Artiste inconnu',
+            artwork: t.thumbnail || '',
+            trackCount: 1,
+            isOffline: true
+          });
+        } else {
+          albumsMap.get(albKey).trackCount++;
+        }
+      }
+    }
+
+    return {
+      tracks: sortedLocalTracks,
+      artists: Array.from(artistsMap.values()).slice(0, 10),
+      albums: Array.from(albumsMap.values()).slice(0, 12),
+      isOffline: true
+    };
+  } catch (err) {
+    console.error('[OfflineSearch] Erreur recherche locale:', err);
+    return { tracks: [], artists: [], albums: [], isOffline: true };
+  }
+}
+

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
 import { AudioProvider, useAudio } from './context/AudioContext';
 import { SearchProvider } from './context/SearchContext';
@@ -18,6 +18,7 @@ import SearchPage from './pages/SearchPage';
 import ArtistPage from './pages/ArtistPage';
 import LibraryPage from './pages/LibraryPage';
 import SettingsPage from './pages/SettingsPage';
+import ProfilePage from './pages/ProfilePage';
 import VinylPlayer from './components/player/VinylPlayer';
 import LandingPage from './pages/LandingPage';
 import PresentationPage from './pages/PresentationPage';
@@ -33,8 +34,11 @@ function AppContent() {
   const prevUserRef = useRef(user);
 
   useEffect(() => {
-    if (user && !prevUserRef.current) {
-      navigate('/');
+    if (user) {
+      setShowLoginOnWeb(false);
+      if (!prevUserRef.current) {
+        navigate('/');
+      }
     }
     prevUserRef.current = user;
   }, [user, navigate]);
@@ -52,7 +56,13 @@ function AppContent() {
       return (
         <>
           <OfflineNotice />
-          <LandingPage onBackToPresentation={!isNativeApp ? () => setShowLoginOnWeb(false) : null} />
+          <LandingPage 
+            onLoginSuccess={() => {
+              setShowLoginOnWeb(false);
+              navigate('/');
+            }}
+            onBackToPresentation={!isNativeApp ? () => setShowLoginOnWeb(false) : null} 
+          />
         </>
       );
     } else {
@@ -60,8 +70,15 @@ function AppContent() {
         <>
           <OfflineNotice />
           <PresentationPage 
-            onEnterWebPlayer={() => setShowLoginOnWeb(true)} 
-            onEnterAsGuest={signInAsGuest} 
+            onEnterWebPlayer={() => {
+              signInAsGuest();
+              toast.success("Bienvenue ! Accès au Web Player accordé.");
+            }} 
+            onOpenLogin={() => setShowLoginOnWeb(true)} 
+            onEnterAsGuest={() => {
+              signInAsGuest();
+              toast.success("Bienvenue ! Mode Invité activé.");
+            }} 
           />
         </>
       );
@@ -106,6 +123,7 @@ function AppContent() {
               <Route path="/search" element={<SearchPage />} />
               <Route path="/artist/:artistName" element={<ArtistPage />} />
               <Route path="/library" element={<LibraryPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/accueil" element={<Navigate to="/" replace />} />
               <Route path="/acceuil" element={<Navigate to="/" replace />} />

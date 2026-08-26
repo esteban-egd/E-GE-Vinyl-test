@@ -37,6 +37,8 @@ jobs:
       - name: Build Electron App
         env:
           VITE_IS_APP: "true"
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --windows nsis:x64 --publish never
 

@@ -14,7 +14,10 @@ export default function BottomNav() {
   ];
 
   return (
-    <div className="fixed bottom-0 w-full bg-[#0c0a09]/85 backdrop-blur-2xl border-t border-white/[0.04] safe-bottom pb-2 z-50">
+    <div 
+      className="fixed bottom-0 w-full backdrop-blur-2xl border-t border-white/[0.04] safe-bottom pb-2 z-50 transition-colors duration-300"
+      style={{ backgroundColor: `${currentTheme.cardBg}eb` }}
+    >
       <nav className="flex justify-around items-center h-16 px-2">
         {navItems.map((item) => (
           <NavLink
@@ -32,27 +35,31 @@ export default function BottomNav() {
               <>
                 <div 
                   className={`relative flex items-center justify-center w-9 h-9 rounded-full mb-0.5 transition-all duration-300 ${
-                    isActive ? 'border border-[#c29e5a]/30 shadow-lg' : ''
+                    isActive ? 'shadow-lg' : ''
                   }`}
                   style={{
-                    backgroundColor: isActive ? 'rgba(194, 158, 90, 0.08)' : 'transparent',
-                    color: isActive ? '#c29e5a' : undefined,
-                    boxShadow: isActive ? '0 0 15px rgba(194, 158, 90, 0.15)' : 'none'
+                    backgroundColor: isActive ? currentTheme.bgAccent : 'transparent',
+                    color: isActive ? currentTheme.primary : undefined,
+                    borderColor: isActive ? `${currentTheme.primary}40` : 'transparent',
+                    borderWidth: isActive ? '1px' : '0px',
+                    boxShadow: isActive ? `0 0 15px ${currentTheme.glow}` : 'none'
                   }}
                 >
                   <item.icon size={17} strokeWidth={isActive ? 2.5 : 1.75} />
                 </div>
                 <span 
-                  className={`text-[8.5px] uppercase tracking-widest font-semibold transition-colors duration-300 ${
-                    isActive ? 'text-[#c29e5a] font-black' : 'text-gray-500'
-                  }`}
+                  className="text-[8.5px] uppercase tracking-widest font-semibold transition-colors duration-300"
+                  style={{ color: isActive ? currentTheme.primary : undefined, fontWeight: isActive ? 900 : 600 }}
                 >
                   {item.label}
                 </span>
                 
                 {/* Micro Dot indicator under active icon */}
                 {isActive && (
-                  <span className="absolute bottom-1 w-1 h-1 rounded-full bg-[#c29e5a] shadow-[0_0_8px_#c29e5a]" />
+                  <span 
+                    className="absolute bottom-1 w-1 h-1 rounded-full transition-all duration-300" 
+                    style={{ backgroundColor: currentTheme.primary, boxShadow: `0 0 8px ${currentTheme.primary}` }}
+                  />
                 )}
               </>
             )}

@@ -3,6 +3,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { Play, Pause, SkipForward } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import TrackImage from '../common/TrackImage';
+import DownloadBadge from '../common/DownloadBadge';
 
 export default function MiniPlayer() {
   const { currentTrack, isPlaying, togglePlayPause, playNext, isLoading } = useAudio();
@@ -43,7 +44,10 @@ export default function MiniPlayer() {
 
         {/* Track Info */}
         <div className="flex-1 min-w-0 mx-3 z-10">
-          <p className="text-sm font-bold text-white truncate">{currentTrack.title}</p>
+          <p className="text-sm font-bold text-white truncate flex items-center gap-2">
+            {currentTrack.title}
+            <DownloadBadge videoId={currentTrack.videoId || currentTrack.id} />
+          </p>
           <p className="text-xs text-gray-400 truncate">{currentTrack.artist}</p>
         </div>
 

@@ -1,30 +1,48 @@
+import capybaraImg from '../assets/images/capybara_avatar_1787780827335.jpg';
+import cyberCatImg from '../assets/images/cyber_cat_avatar_1787780841357.jpg';
+import raccoonImg from '../assets/images/raccoon_avatar_1787780854828.jpg';
+import redPandaImg from '../assets/images/red_panda_avatar_1787780868202.jpg';
+import polarFoxImg from '../assets/images/polar_fox_avatar_1787780879370.jpg';
+
 export const PRESET_AVATARS = [
   {
-    id: 'snoopy-dj',
-    name: 'Snoopy Beats',
-    tag: 'Mignon & Cool',
-    url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=300&q=80',
-    fallback: 'https://api.dicebear.com/7.x/bottts/svg?seed=SnoopyBeats'
+    id: 'capybara-chill',
+    name: 'Capybara Chill',
+    subtitle: 'Casque Lo-Fi & Vibe Zen',
+    tag: 'Chill',
+    url: capybaraImg,
+    fallback: 'https://api.dicebear.com/7.x/bottts/svg?seed=CapybaraChill&backgroundColor=1db954'
   },
   {
-    id: 'cute-cat-headphones',
-    name: 'Chat Mélomane',
-    tag: 'Marrant',
-    url: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=300&q=80',
-    fallback: 'https://api.dicebear.com/7.x/bottts/svg?seed=ChatMelomane'
+    id: 'cyber-cat',
+    name: 'Chat Cyberpunk',
+    subtitle: 'Visière Néon & Rétrofutur',
+    tag: 'Cyberpunk',
+    url: cyberCatImg,
+    fallback: 'https://api.dicebear.com/7.x/bottts/svg?seed=CyberCat&backgroundColor=00f2fe'
   },
   {
-    id: 'chill-panda',
-    name: 'Panda Vinyl',
-    tag: 'Zen',
-    url: 'https://images.unsplash.com/photo-1564349683136-77e08dba1ef9?auto=format&fit=crop&w=300&q=80',
-    fallback: 'https://api.dicebear.com/7.x/big-ears-neutral/svg?seed=PandaVinyl'
+    id: 'raccoon-vinyl',
+    name: 'Raton Laveur Mélomane',
+    subtitle: 'Vinyle Collector sous le bras',
+    tag: 'Vinyl',
+    url: raccoonImg,
+    fallback: 'https://api.dicebear.com/7.x/bottts/svg?seed=RaccoonVinyl&backgroundColor=c29e5a'
   },
   {
-    id: 'funny-dog',
-    name: 'Toutou Funk',
-    tag: 'Fun',
-    url: 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&w=300&q=80',
-    fallback: 'https://api.dicebear.com/7.x/bottts/svg?seed=ToutouFunk'
+    id: 'red-panda-dj',
+    name: 'Panda Roux DJ',
+    subtitle: 'Mix Kawaii & Platines',
+    tag: 'Kawaii',
+    url: redPandaImg,
+    fallback: 'https://api.dicebear.com/7.x/bottts/svg?seed=RedPandaDJ&backgroundColor=ff4e50'
+  },
+  {
+    id: 'polar-fox',
+    name: 'Renard Polaire Audiophile',
+    subtitle: 'Acoustique Crystal 320 kbps',
+    tag: 'Audiophile',
+    url: polarFoxImg,
+    fallback: 'https://api.dicebear.com/7.x/bottts/svg?seed=PolarFox&backgroundColor=8a2be2'
   }
 ];

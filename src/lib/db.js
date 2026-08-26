@@ -25,7 +25,8 @@ db.version(2).stores({
 });
 
 db.version(3).stores({
-  offlineTracks: 'videoId, title, artist, album, thumbnail, downloadedAt'
+  offlineTracks: 'videoId, title, artist, album, thumbnail, downloadedAt',
+  searchHistory: '++id, userId, query, createdAt'
 });
 
 export default db;

@@ -223,6 +223,21 @@ async function startServer() {
     }
   });
 
+  // Proxy Deezer Search Album
+  app.get("/api/deezer-search-album", async (req, res) => {
+    try {
+      const q = req.query.q as string;
+      if (!q) return res.status(400).json({ error: "Missing query q" });
+      const dzRes = await fetch(`https://api.deezer.com/search/album?q=${encodeURIComponent(q)}&limit=20`, {
+        headers: { "User-Agent": "Mozilla/5.0" }
+      });
+      const data = await dzRes.json();
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Proxy Deezer Artist
   app.get("/api/deezer-artist", async (req, res) => {
     try {
@@ -253,22 +268,55 @@ async function startServer() {
     }
   });
 
-  // Proxy Deezer Artist Albums
+  // Proxy Deezer Artist Albums with Pagination (limit 100, looping index)
   app.get("/api/deezer-artist-albums", async (req, res) => {
     try {
       const id = req.query.id as string;
       if (!id) return res.status(400).json({ error: "Missing artist id" });
-      const dzRes = await fetch(`https://api.deezer.com/artist/${encodeURIComponent(id)}/albums?limit=50`, {
-        headers: { "User-Agent": "Mozilla/5.0" }
-      });
-      const data = await dzRes.json();
-      res.json(data);
+      
+      let allAlbums: any[] = [];
+      let index = 0;
+      let total = 0;
+      
+      do {
+        const dzRes = await fetch(`https://api.deezer.com/artist/${encodeURIComponent(id)}/albums?limit=100&index=${index}`, {
+          headers: { "User-Agent": "Mozilla/5.0" }
+        });
+        if (!dzRes.ok) break;
+        const data = await dzRes.json();
+        if (data && Array.isArray(data.data)) {
+          allAlbums = allAlbums.concat(data.data);
+          total = data.total || allAlbums.length;
+          if (data.data.length < 100 || allAlbums.length >= total || allAlbums.length >= 200) {
+            break;
+          }
+        } else {
+          break;
+        }
+        index += 100;
+      } while (index < 300);
+
+      res.json({ data: allAlbums, total: allAlbums.length });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
   // Proxy Deezer Album Tracks
+  app.get("/api/deezer-artist-related", async (req, res) => {
+    try {
+      const { id } = req.query;
+      const dzRes = await fetch(`https://api.deezer.com/artist/${encodeURIComponent(id as string)}/related?limit=20`, {
+        headers: { "Accept": "application/json" }
+      });
+      const data = await dzRes.json();
+      res.json(data);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to fetch Deezer related artists" });
+    }
+  });
+
   app.get("/api/deezer-album-tracks", async (req, res) => {
     try {
       const id = req.query.id as string;

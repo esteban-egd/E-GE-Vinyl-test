@@ -32,7 +32,14 @@ export const AuthProvider = ({ children }) => {
       try {
         const parsed = JSON.parse(guestUser);
         setUser(parsed);
-        setProfile({ full_name: 'Invité E-GE', username: 'guest' });
+        const savedGuestProfile = localStorage.getItem('ege_guest_profile');
+        let initialProfile = { full_name: 'Invité E-GE', username: 'guest', avatar_url: '' };
+        if (savedGuestProfile) {
+          try {
+            initialProfile = { ...initialProfile, ...JSON.parse(savedGuestProfile) };
+          } catch {}
+        }
+        setProfile(initialProfile);
         setLoading(false);
         return;
       } catch {}
@@ -66,17 +73,26 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const signInAsGuest = (guestEmail, guestUsername, guestFullName, guestAvatarUrl) => {
+    const emailStr = (typeof guestEmail === 'string' && guestEmail.trim()) ? guestEmail.trim() : 'guest@ege-vinyl.local';
+    const usernameStr = (typeof guestUsername === 'string' && guestUsername.trim()) ? guestUsername.trim() : 'guest';
+    const fullNameStr = (typeof guestFullName === 'string' && guestFullName.trim()) ? guestFullName.trim() : 'Invité E-GE';
+    const avatarStr = (typeof guestAvatarUrl === 'string' && guestAvatarUrl.trim()) ? guestAvatarUrl.trim() : '';
+
     const guest = { 
-      id: 'guest-' + (guestUsername || 'local-user'), 
-      email: guestEmail || 'guest@ege-vinyl.local', 
+      id: 'guest-' + (usernameStr || 'local-user'), 
+      email: emailStr, 
       is_guest: true 
     };
-    localStorage.setItem('ege_guest_user', JSON.stringify(guest));
+    try {
+      localStorage.setItem('ege_guest_user', JSON.stringify(guest));
+    } catch (err) {
+      console.warn('[Auth] LocalStorage error for guest user:', err);
+    }
     setUser(guest);
     setProfile({ 
-      full_name: guestFullName || guestUsername || 'Invité E-GE', 
-      username: guestUsername || 'guest',
-      avatar_url: guestAvatarUrl || ''
+      full_name: fullNameStr, 
+      username: usernameStr,
+      avatar_url: avatarStr
     });
   };
 
@@ -84,8 +100,36 @@ export const AuthProvider = ({ children }) => {
     user,
     profile,
     fetchProfile,
-    signIn: (email, password) => supabase.auth.signInWithPassword({ email, password }),
-    signUp: (email, password) => supabase.auth.signUp({ email, password }),
+    signIn: async (email, password) => {
+      try {
+        const res = await supabase.auth.signInWithPassword({ email, password });
+        if (!res.error && res.data?.user) {
+          localStorage.removeItem('ege_guest_user');
+          setUser(res.data.user);
+          if (res.data.user.id) {
+            fetchProfile(res.data.user.id);
+          }
+        }
+        return res;
+      } catch (err) {
+        return { data: null, error: err };
+      }
+    },
+    signUp: async (email, password) => {
+      try {
+        const res = await supabase.auth.signUp({ email, password });
+        if (!res.error && res.data?.user && res.data?.session) {
+          localStorage.removeItem('ege_guest_user');
+          setUser(res.data.user);
+          if (res.data.user.id) {
+            fetchProfile(res.data.user.id);
+          }
+        }
+        return res;
+      } catch (err) {
+        return { data: null, error: err };
+      }
+    },
     signInAsGuest,
     signOut: async () => {
       localStorage.removeItem('ege_guest_user');
@@ -96,7 +140,13 @@ export const AuthProvider = ({ children }) => {
     updateProfile: async (updates) => {
       if (!user) throw new Error('No user logged in');
       if (user.is_guest) {
-        setProfile((prev) => ({ ...prev, ...updates }));
+        setProfile((prev) => {
+          const next = { ...prev, ...updates };
+          try {
+            localStorage.setItem('ege_guest_profile', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
         return;
       }
       const { error } = await supabase

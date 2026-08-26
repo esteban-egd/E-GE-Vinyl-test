@@ -4,6 +4,8 @@
  */
 
 
+import { parseDurationToSeconds, getRealisticDuration } from '../utils/formatDuration';
+
 /**
  * Extrait systématiquement l'ID YouTube valide de 11 caractères
  * (gère les URLs complètes, raccourcies youtu.be, shorts, embeds, et IDs directs).
@@ -116,7 +118,7 @@ export async function searchLyraMusic(query) {
           title: t.title,
           artist: t.artist || 'Artiste inconnu',
           thumbnail: t.thumbnail || `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg`,
-          duration: 210
+          duration: parseDurationToSeconds(t.duration || t.lengthSeconds, `${t.title}_${t.artist}_${t.videoId}`)
         }));
       }
     }
@@ -148,13 +150,15 @@ export async function searchLyraMusic(query) {
           const videoId = card.buttons?.find((b) => b?.buttonRenderer?.command?.watchEndpoint?.videoId)?.buttonRenderer?.command?.watchEndpoint?.videoId ||
                           card.title?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId;
           if (videoId) {
+            const cardTitle = card.title?.runs?.[0]?.text || '';
+            const cardArtist = card.subtitle?.runs?.map(r => r.text).join('') || 'Artiste inconnu';
             tracks.unshift({
               id: videoId,
               videoId: videoId,
-              title: card.title?.runs?.[0]?.text || '',
-              artist: card.subtitle?.runs?.map(r => r.text).join('') || 'Artiste inconnu',
+              title: cardTitle,
+              artist: cardArtist,
               thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-              duration: 210
+              duration: parseDurationToSeconds(card.subtitle?.runs?.[2]?.text, `${cardTitle}_${cardArtist}_${videoId}`)
             });
           }
         }
@@ -169,6 +173,21 @@ export async function searchLyraMusic(query) {
             const title = flexColumns[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || '';
             const artistRuns = flexColumns[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
             const artist = artistRuns.map(r => r.text).join('') || 'Artiste inconnu';
+            
+            // Look for time string in flexColumns or fixedColumns
+            let durStr = item?.musicResponsiveListItemRenderer?.fixedColumns?.[0]?.musicResponsiveListItemFixedColumnRenderer?.text?.runs?.[0]?.text;
+            if (!durStr) {
+              for (const col of flexColumns) {
+                const textRuns = col?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
+                for (const tr of textRuns) {
+                  if (tr?.text && /^\d+:\d{2}(:\d{2})?$/.test(tr.text.trim())) {
+                    durStr = tr.text.trim();
+                    break;
+                  }
+                }
+                if (durStr) break;
+              }
+            }
 
             tracks.push({
               id: videoId,
@@ -176,7 +195,7 @@ export async function searchLyraMusic(query) {
               title: title,
               artist: artist,
               thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-              duration: 210
+              duration: parseDurationToSeconds(durStr, `${title}_${artist}_${videoId}`)
             });
           }
         }
@@ -201,7 +220,7 @@ export async function searchLyraMusic(query) {
       title: item.title,
       artist: item.author || 'Artiste inconnu',
       thumbnail: item.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
-      duration: item.lengthSeconds || 200
+      duration: parseDurationToSeconds(item.lengthSeconds, `${item.title}_${item.author}_${item.videoId}`)
     }));
   });
 
@@ -223,6 +242,70 @@ export const searchYouTubeMusic = searchLyraMusic;
  * 3. Cobalt API Direct
  * 4. Piped API instances (flux m4a / webm complets)
  */
-export async function getLyraAudioStream() {
-  return null;
+export async function getLyraAudioStream(videoId, title, artist) {
+  if (!videoId) return null;
+
+  // 1. First, try several Invidious instances to fetch the audio stream direct URL
+  const instances = [
+    'https://invidious.nerdvpn.de',
+    'https://inv.tux.pizza',
+    'https://invidious.jing.rocks',
+    'https://invidious.privacyredirect.com',
+    'https://invidious.drgns.space',
+    'https://yt.artemislena.eu',
+    'https://invidious.projectsegfau.lt'
+  ];
+
+  for (const inst of instances) {
+    try {
+      const res = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+        signal: AbortSignal.timeout(4000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Look for adaptiveFormats or formatStreams that contain audio
+        const audioFormat = data.adaptiveFormats?.find(f => f.mimeType?.startsWith('audio/'));
+        if (audioFormat?.url) {
+          return audioFormat.url;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Fallback to Cobalt API (highly reliable direct video/audio resolver)
+  try {
+    const res = await fetch('https://api.cobalt.tools/api/json', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+        isAudioOnly: true,
+        audioFormat: 'mp3',
+        audioQuality: '8' // 320kbps
+      }),
+      signal: AbortSignal.timeout(5000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.url) return data.url;
+    }
+  } catch (_) {}
+
+  // 3. Fallback to Piped API
+  try {
+    const res = await fetch(`https://pipedapi.kavin.rocks/streams/${videoId}`, {
+      signal: AbortSignal.timeout(4000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const audioStream = data.audioStreams?.find(s => s.mimeType?.startsWith('audio/'));
+      if (audioStream?.url) return audioStream.url;
+    }
+  } catch (_) {}
+
+  // 4. Default to standard public search stream format endpoint or fallback to Vercel api stream endpoint
+  return `/api/stream?id=${videoId}`;
 }

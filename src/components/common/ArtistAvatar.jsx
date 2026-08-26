@@ -1,44 +1,82 @@
 import { useState, useEffect } from 'react';
 import { fetchTheAudioDbArtistVisuals, isValidArtwork } from '../../services/musicDataService';
 
+// Extract initials for the placeholder
+function getInitials(name) {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Generate a deterministic gradient color based on the name
+function getGradient(name) {
+  let hash = 0;
+  const str = name || 'Artiste';
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const colors = [
+    ['#3a1c71', '#d76d77', '#ffaf7b'],
+    ['#4ca1af', '#c4e0e5', '#c4e0e5'],
+    ['#ff9966', '#ff5e62', '#ff5e62'],
+    ['#00c6ff', '#0072ff', '#0072ff'],
+    ['#11998e', '#38ef7d', '#38ef7d'],
+    ['#fc4a1a', '#f7b733', '#f7b733'],
+    ['#8E2DE2', '#4A00E0', '#4A00E0']
+  ];
+  const idx = Math.abs(hash) % colors.length;
+  const c = colors[idx];
+  return `linear-gradient(135deg, ${c[0]}, ${c[1]})`;
+}
+
 export default function ArtistAvatar({ artistName, fallbackSrc, className = '' }) {
-  const validInitial = isValidArtwork(fallbackSrc) ? fallbackSrc : null;
-  const [src, setSrc] = useState(validInitial);
+  const [src, setSrc] = useState(null);
   const [hasErrored, setHasErrored] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     if (!artistName) return;
-
+    
+    // Reset state when artist changes (Prevents showing previous artist's image)
     setHasErrored(false);
+    setIsLoading(true);
+    const initialSrc = isValidArtwork(fallbackSrc) ? fallbackSrc : null;
+    setSrc(initialSrc);
 
     const cleanName = artistName.trim().toLowerCase();
-    const cacheKey = `artist_avatar_v20_${cleanName}`;
+    const cacheKey = `artist_avatar_v21_${cleanName}`;
     const cached = localStorage.getItem(cacheKey);
 
     if (cached && isValidArtwork(cached)) {
       setSrc(cached);
+      setIsLoading(false);
       return;
     }
 
-    if (isValidArtwork(fallbackSrc)) {
-      setSrc(fallbackSrc);
+    if (initialSrc) {
+      setSrc(initialSrc);
     }
 
     fetchTheAudioDbArtistVisuals(artistName)
       .then(visuals => {
-        if (active && visuals && isValidArtwork(visuals.avatar)) {
-          setSrc(visuals.avatar);
-          try {
-            localStorage.setItem(cacheKey, visuals.avatar);
-          } catch (_) {}
-        } else if (active && isValidArtwork(fallbackSrc)) {
-          setSrc(fallbackSrc);
+        if (active) {
+          if (visuals && isValidArtwork(visuals.avatar)) {
+            setSrc(visuals.avatar);
+            try {
+              localStorage.setItem(cacheKey, visuals.avatar);
+            } catch (_) {}
+          } else {
+            setSrc(initialSrc); // Enforce fallback if no visuals found
+          }
+          setIsLoading(false);
         }
       })
       .catch(() => {
-        if (active && isValidArtwork(fallbackSrc)) {
-          setSrc(fallbackSrc);
+        if (active) {
+          setSrc(initialSrc);
+          setIsLoading(false);
         }
       });
 
@@ -48,34 +86,29 @@ export default function ArtistAvatar({ artistName, fallbackSrc, className = '' }
   }, [artistName, fallbackSrc]);
 
   const handleError = () => {
-    if (hasErrored) return;
-    setHasErrored(true);
-
-    // Collection de secours d'ambiance scénique et musiciens professionnels
-    const fallbackAvatars = [
-      'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=400&auto=format&fit=crop&q=80'
-    ];
-
-    let hash = 0;
-    const name = artistName || 'Music';
-    for (let i = 0; i < name.length; i++) {
-      hash = name.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const idx = Math.abs(hash) % fallbackAvatars.length;
-    setSrc(fallbackAvatars[idx]);
+    if (!hasErrored) setHasErrored(true);
   };
 
-  const currentSrc = isValidArtwork(src) ? src : (
-    isValidArtwork(fallbackSrc) ? fallbackSrc : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&auto=format&fit=crop&q=80'
-  );
+  const finalSrc = isValidArtwork(src) ? src : null;
+  const showPlaceholder = !finalSrc || hasErrored;
+
+  if (showPlaceholder) {
+    return (
+      <div 
+        className={`flex items-center justify-center font-bold text-white shadow-inner ${className}`}
+        style={{ 
+          background: getGradient(artistName),
+          fontSize: 'clamp(1rem, 30%, 3rem)' 
+        }}
+      >
+        <span className="opacity-80 tracking-widest">{getInitials(artistName)}</span>
+      </div>
+    );
+  }
 
   return (
     <img 
-      src={currentSrc} 
+      src={finalSrc} 
       alt={artistName || 'Artiste'} 
       className={className} 
       onError={handleError}

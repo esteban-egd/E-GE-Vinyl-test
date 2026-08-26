@@ -1,4 +1,5 @@
 import { extractYouTubeId } from './lyraAudio';
+import { classifyTrack } from '../utils/trackClassifier';
 
 export async function searchLyraTracks(query) {
   if (!query || !query.trim()) return [];
@@ -43,14 +44,17 @@ export async function searchLyraTracks(query) {
           const thumbnails = track.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails || [];
           const thumbnail = thumbnails.length > 0 ? thumbnails[thumbnails.length - 1].url : "";
           
-          tracks.push({
+          const rawTrackObj = {
             id: videoId,
             videoId,
             title,
             artist: cleanArtist || 'Artiste',
             thumbnail,
             source: 'youtube-music'
-          });
+          };
+
+          const classified = classifyTrack(rawTrackObj);
+          tracks.push(classified || rawTrackObj);
         }
       }
       return tracks.filter(Boolean);
