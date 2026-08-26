@@ -36,7 +36,7 @@ jobs:
         env:
           VITE_IS_APP: "true"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --windows nsis:ia32 nsis:x64 --publish never
+        run: npx electron-builder --windows nsis:x64 --publish never
 
       - name: Upload Windows Executable (.exe)
         uses: actions/upload-artifact@v4
