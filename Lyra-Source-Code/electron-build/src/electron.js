@@ -44,7 +44,7 @@ const electron_unhandled_1 = __importDefault(require("electron-unhandled"));
 const electron_context_menu_1 = __importDefault(require("electron-context-menu"));
 // Opt into Chromium's MediaSessionService + HardwareMediaKeyHandling so OS
 // media keys reach navigator.mediaSession in the renderer AND register Lyra
-// with macOS MPNowPlayingInfoCenter. Must run before app.whenReady().
+// with macOS MPNowPlayingInfoCenter. Must run before electron_1.app.whenReady().
 (0, electron_main_2.enableMediaKeyFeatures)();
 let win;
 let isQuitting = false;
@@ -216,6 +216,7 @@ function createWindow() {
         title: 'Lyra Music',
         webPreferences: {
             webSecurity: false,
+      allowRunningInsecureContent: true,
             devTools: true,
             // See resolvePreloadPath(): app.getAppPath() is NOT stable across launch
             // modes, so we probe the real candidates and use the first that exists.
@@ -303,7 +304,7 @@ function createWindow() {
     });
     // Load the app
     
-    win.webContents.openDevTools();
+    /* win.webContents.openDevTools(); */
     if (electron_is_dev_1.default) {
         const startUrl = 'http://localhost:3000';
         const ses = win.webContents.session;
@@ -384,7 +385,24 @@ else {
             pendingDeepLink = url;
         }
     });
-    electron_1.app.whenReady().then(() => {
+    require('electron').app.whenReady().then(() => {
+    try {
+      const { session } = require('electron');
+      if (session && session.defaultSession) {
+        session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+          callback({
+            responseHeaders: {
+              ...details.responseHeaders,
+              'Access-Control-Allow-Origin': ['*'],
+              'Access-Control-Allow-Methods': ['GET, POST, PUT, DELETE, OPTIONS'],
+              'Access-Control-Allow-Headers': ['*']
+            }
+          });
+        });
+      }
+    } catch (e) {
+      console.error('Failed to bind CORS headers interceptor', e);
+    }
         // Register protocol handler to serve build files in production
         if (!electron_is_dev_1.default) {
             // app.getAppPath() === the asar root in packaged builds; the renderer is

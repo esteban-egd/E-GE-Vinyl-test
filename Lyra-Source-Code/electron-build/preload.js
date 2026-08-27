@@ -154,6 +154,7 @@ var exposeDesktopElectronAPI = () => {
       import_electron.ipcRenderer.on("updateProgress", callback);
     },
     // App controls
+    downloadAudioBuffer: (url) => import_electron.ipcRenderer.invoke('download-audio-buffer', url),
     reloadApp: () => import_electron.ipcRenderer.invoke("reloadApp"),
     quitApp: () => import_electron.ipcRenderer.invoke("quitApp"),
     setAppIcon: (iconPath) => import_electron.ipcRenderer.invoke("setAppIcon", iconPath),

@@ -4388,7 +4388,8 @@ var init_filePicker = __esm({
     initFilePickerAdapter = async () => {
       if (!guard13.bind()) return;
       if (!import_electron9.app.isReady()) {
-        await import_electron9.app.whenReady();
+        await 
+import_electron9.app.whenReady();
       }
       filePickerEventsBus_default.addListener(async (event) => {
         try {
@@ -10087,6 +10088,22 @@ var init_desktopEvents = __esm({
       import_electron13.ipcMain.handle("isWindowFullscreen", () => {
         return win2.isFullScreen();
       });
+      
+      import_electron13.ipcMain.handle('download-audio-buffer', async (event, streamUrl) => {
+        try {
+          const response = await fetch(streamUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+          });
+          if (!response.ok) throw new Error('HTTP error ' + response.status);
+          const arrayBuffer = await response.arrayBuffer();
+          // Convert arrayBuffer to Buffer to send over IPC
+          return Buffer.from(arrayBuffer);
+        } catch (err) {
+          console.error('[Main] download-audio-buffer error:', err);
+          throw err;
+        }
+      });
+
       import_electron13.ipcMain.handle("reloadApp", () => {
         const startUrl = import_electron13.app.isPackaged ? "app://localhost/index.html" : "http://localhost:3000";
         win2.loadURL(startUrl);
@@ -10687,6 +10704,7 @@ function createDesktopMain(opts) {
       title,
       webPreferences: {
         webSecurity: false,
+      allowRunningInsecureContent: true,
         devTools: devToolsAlwaysOn || dev,
         preload: preloadPath,
         spellcheck: true,
@@ -10697,7 +10715,7 @@ function createDesktopMain(opts) {
     });
     bindWindowEvents2(_mainWindow);
     
-    _mainWindow.webContents.openDevTools();
+    /* _mainWindow.webContents.openDevTools(); */
     if (dev) {
       _mainWindow.loadURL("http://localhost:3000");
     } else {
@@ -10754,7 +10772,24 @@ function createDesktopMain(opts) {
       pendingDeepLink2 = url;
     }
   });
-  import_electron16.app.whenReady().then(() => {
+  require('electron').app.whenReady().then(() => {
+    try {
+      const { session } = require('electron');
+      if (session && session.defaultSession) {
+        session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+          callback({
+            responseHeaders: {
+              ...details.responseHeaders,
+              'Access-Control-Allow-Origin': ['*'],
+              'Access-Control-Allow-Methods': ['GET, POST, PUT, DELETE, OPTIONS'],
+              'Access-Control-Allow-Headers': ['*']
+            }
+          });
+        });
+      }
+    } catch (e) {
+      console.error('Failed to bind CORS headers interceptor', e);
+    }
     if (!dev) {
       const buildPath = require('fs').existsSync(import_path6.default.join(__dirname, "..", "..", "dist"))
         ? import_path6.default.join(__dirname, "..", "..", "dist")
@@ -11740,6 +11775,7 @@ function createWindow() {
     title: "E-GE Vinyl",
     webPreferences: {
       webSecurity: false,
+      allowRunningInsecureContent: true,
       devTools: true,
       // See resolvePreloadPath(): app.getAppPath() is NOT stable across launch
       // modes, so we probe the real candidates and use the first that exists.
@@ -11793,7 +11829,7 @@ function createWindow() {
     return { action: "deny" };
   });
   
-  win.webContents.openDevTools();
+  /* win.webContents.openDevTools(); */
   if (import_electron_is_dev.default) {
     const startUrl = "http://localhost:3000";
     const ses = win.webContents.session;
@@ -11856,7 +11892,24 @@ if (!gotTheLock) {
       pendingDeepLink = url;
     }
   });
-  import_electron20.app.whenReady().then(() => {
+  require('electron').app.whenReady().then(() => {
+    try {
+      const { session } = require('electron');
+      if (session && session.defaultSession) {
+        session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+          callback({
+            responseHeaders: {
+              ...details.responseHeaders,
+              'Access-Control-Allow-Origin': ['*'],
+              'Access-Control-Allow-Methods': ['GET, POST, PUT, DELETE, OPTIONS'],
+              'Access-Control-Allow-Headers': ['*']
+            }
+          });
+        });
+      }
+    } catch (e) {
+      console.error('Failed to bind CORS headers interceptor', e);
+    }
     if (!import_electron_is_dev.default) {
       const buildPath = import_path7.default.join(import_electron20.app.getAppPath(), "build");
       import_electron20.protocol.handle("app", async (request) => {
