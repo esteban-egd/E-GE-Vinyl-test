@@ -1,8 +1,8 @@
 import React from 'react';
-import { CheckCircle } from 'lucide-react';
+import { ArrowDown } from 'lucide-react';
 import { useOffline } from '../../hooks/useOffline';
 
-export default function DownloadBadge({ videoId, className = '' }) {
+export default function DownloadBadge({ videoId, className = '', showLabel = false }) {
   const { downloadedTrackIds } = useOffline();
   
   if (!videoId || !downloadedTrackIds.has(videoId)) {
@@ -10,8 +10,18 @@ export default function DownloadBadge({ videoId, className = '' }) {
   }
   
   return (
-    <span className={`inline-flex items-center text-green-500 shrink-0 ${className}`} title="Téléchargé en local">
-      <CheckCircle size={14} fill="currentColor" className="text-black bg-green-500 rounded-full" />
+    <span 
+      className={`inline-flex items-center gap-1.5 shrink-0 ${className}`} 
+      title="Morceau téléchargé (accessible 100% hors-ligne)"
+    >
+      <div className="w-4 h-4 rounded-full bg-emerald-500 text-black flex items-center justify-center shadow-sm">
+        <ArrowDown size={10} strokeWidth={3.5} />
+      </div>
+      {showLabel && (
+        <span className="text-[10px] font-bold tracking-wider text-emerald-400">
+          Téléchargé
+        </span>
+      )}
     </span>
   );
 }

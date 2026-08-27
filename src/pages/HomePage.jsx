@@ -210,9 +210,17 @@ export default function HomePage() {
             <Disc size={22} className={isPlaying ? "animate-spin-slow" : ""} />
           </div>
           <div>
-            <h1 className="text-2xl md:text-3xl font-black text-white tracking-tighter leading-none uppercase">
-              Le Salon E-GE
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl md:text-3xl font-black text-white tracking-tighter leading-none uppercase">
+                Le Salon E-GE
+              </h1>
+              {user?.is_guest && (
+                <span className="px-2.5 py-0.5 rounded-full text-[9px] font-mono font-black uppercase tracking-wider bg-[#c29e5a]/20 text-[#e1bb72] border border-[#c29e5a]/40 flex items-center gap-1">
+                  <Sparkles size={10} />
+                  <span>Mode Invité Actif</span>
+                </span>
+              )}
+            </div>
             <span className="text-[10px] text-gray-400 font-bold block mt-1 uppercase tracking-widest">
               Recommandations Personnalisées, Platine 3D & Playlists
             </span>

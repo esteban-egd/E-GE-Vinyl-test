@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
 import { AudioProvider, useAudio } from './context/AudioContext';
@@ -22,15 +22,18 @@ import ProfilePage from './pages/ProfilePage';
 import VinylPlayer from './components/player/VinylPlayer';
 import LandingPage from './pages/LandingPage';
 import PresentationPage from './pages/PresentationPage';
+import NotFoundPage from './pages/NotFoundPage';
 import OfflineNotice from './components/common/OfflineNotice';
 import OfflineSyncBar from './components/common/OfflineSyncBar';
+import { MOCK_VINYLS } from './data/mockVinyls';
 
 function AppContent() {
   const { user, loading, signInAsGuest } = useAuth();
-  const { currentTrack } = useAudio();
+  const { currentTrack, setQueueAndPlay, play } = useAudio();
   const location = useLocation();
   const navigate = useNavigate();
   const [showLoginOnWeb, setShowLoginOnWeb] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const prevUserRef = useRef(user);
 
   useEffect(() => {
@@ -42,6 +45,26 @@ function AppContent() {
     }
     prevUserRef.current = user;
   }, [user, navigate]);
+
+  // Close mobile drawer on route changes
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
+  // Handler for entering guest mode with mock vinyls preload
+  const handleEnterGuestMode = () => {
+    signInAsGuest();
+    toast.success("Bienvenue ! Mode Invité & Démo activé.", {
+      icon: '✨',
+      duration: 4000
+    });
+    // If no track is playing yet, pre-load mock vinyls queue so the turntable is ready to spin immediately
+    if (!currentTrack && MOCK_VINYLS && MOCK_VINYLS.length > 0) {
+      setTimeout(() => {
+        setQueueAndPlay(MOCK_VINYLS, 0);
+      }, 200);
+    }
+  };
 
   // Auto-detection of Native Platform Target (Electron / Capacitor)
   const isNativeApp = import.meta.env.VITE_IS_APP === 'true' || 
@@ -70,15 +93,9 @@ function AppContent() {
         <>
           <OfflineNotice />
           <PresentationPage 
-            onEnterWebPlayer={() => {
-              signInAsGuest();
-              toast.success("Bienvenue ! Accès au Web Player accordé.");
-            }} 
+            onEnterWebPlayer={() => setShowLoginOnWeb(true)} 
             onOpenLogin={() => setShowLoginOnWeb(true)} 
-            onEnterAsGuest={() => {
-              signInAsGuest();
-              toast.success("Bienvenue ! Mode Invité activé.");
-            }} 
+            onEnterAsGuest={handleEnterGuestMode} 
           />
         </>
       );
@@ -94,7 +111,7 @@ function AppContent() {
     <div className="flex h-dvh w-full overflow-hidden bg-[var(--color-canvas)] text-[var(--color-charcoal)] font-sans flex-col">
       <OfflineNotice />
       <OfflineSyncBar />
-      <div className="flex flex-1 w-full overflow-hidden">
+      <div className="flex flex-1 w-full overflow-hidden relative">
         {/* Lecteur Audio Direct Permanent */}
         <audio
           id="global-player"
@@ -106,14 +123,13 @@ function AppContent() {
         {/* Moteur YouTube Iframe Player Unique et Permanent */}
         <YouTubeIframe />
 
-        {/* Desktop Sidebar */}
-        <div className="hidden md:block">
-          <Sidebar />
-        </div>
+        {/* Sidebar (Desktop Fixed & Mobile Drawer) */}
+        <Sidebar isOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
 
-        <div className="flex flex-1 flex-col relative w-full h-full max-w-full">
+        {/* Main Content Area - with desktop left offset for 260px fixed sidebar */}
+        <div className="flex flex-1 flex-col relative w-full h-full max-w-full md:pl-[260px]">
           {/* Global Header */}
-          <Header />
+          <Header onOpenMobileMenu={() => setMobileMenuOpen(true)} />
 
           {/* Main Content Area with Dynamic Padding Bottom */}
           <main className={`flex-1 overflow-y-auto overflow-x-hidden safe-top safe-bottom ${paddingBottomClass}`}>
@@ -127,11 +143,13 @@ function AppContent() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/accueil" element={<Navigate to="/" replace />} />
               <Route path="/acceuil" element={<Navigate to="/" replace />} />
+              <Route path="/dashboard" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </main>
 
           {/* Mini Player */}
-          <div className="absolute bottom-0 w-full z-40 md:bottom-0 transition-all duration-300 transform translate-y-[calc(-100%-var(--safe-bottom))] md:translate-y-0">
+          <div className="absolute bottom-0 left-0 right-0 z-40 md:left-[260px] transition-all duration-300 transform translate-y-[calc(-100%-var(--safe-bottom))] md:translate-y-0">
             <MiniPlayer />
           </div>
 

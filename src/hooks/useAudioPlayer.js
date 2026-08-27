@@ -562,12 +562,14 @@ export function useAudioPlayer() {
       } catch (_) {}
     }
 
-    // Check offline / local cache first (with pre-buffered instant swap)
+    // Check offline / local cache first (with pre-buffered instant swap & Cache API)
     (async () => {
       try {
+        const trackId = trackMeta.videoId || trackMeta.video_id || trackMeta.id;
+
         // Fast path: if this track was already pre-buffered into the secondary audio element, swap in 0ms!
         if (
-          prebufferedTrackIdRef.current === trackMeta.videoId &&
+          prebufferedTrackIdRef.current === trackId &&
           prebufferAudioRef.current &&
           prebufferAudioRef.current.src &&
           audioRef.current
@@ -579,37 +581,92 @@ export function useAudioPlayer() {
           await audioRef.current.play();
           setIsPlaying(true);
           setIsLoading(false);
+          setError(null);
           return;
         }
 
-        const localTrack = await db.offlineTracks.get(trackMeta.videoId);
-        if (localTrack && localTrack.audioBlob) {
+        let offlineBlob = null;
+        let offlineThumbnail = null;
+
+        // 1. Try Dexie offlineTracks
+        if (trackId) {
+          try {
+            const localTrack = await db.offlineTracks.get(trackId);
+            if (localTrack) {
+              if (localTrack.audioBlob) {
+                offlineBlob = localTrack.audioBlob;
+              }
+              if (localTrack.thumbnailBase64) {
+                offlineThumbnail = localTrack.thumbnailBase64;
+              } else if (localTrack.thumbnailBlob) {
+                offlineThumbnail = URL.createObjectURL(localTrack.thumbnailBlob);
+              }
+            }
+          } catch (e) {
+            console.warn('[AudioEngine] Dexie offlineTracks lookup failed:', e);
+          }
+        }
+
+        // 2. Try Dexie audioCache
+        if (!offlineBlob && trackId) {
+          try {
+            const cached = await db.audioCache.get(trackId);
+            if (cached && cached.blob) {
+              offlineBlob = cached.blob;
+            }
+          } catch (e) {
+            console.warn('[AudioEngine] Dexie audioCache lookup failed:', e);
+          }
+        }
+
+        // 3. Try Browser Cache API (Service Worker Cache)
+        if (!offlineBlob && trackId && typeof caches !== 'undefined') {
+          try {
+            const cache = await caches.open('ege-vinyl-audio-cache-v1');
+            const cachedRes = await cache.match(`/offline-audio/${trackId}`);
+            if (cachedRes) {
+              offlineBlob = await cachedRes.blob();
+            }
+
+            if (!offlineThumbnail) {
+              const cachedImg = await cache.match(`/offline-image/${trackId}`);
+              if (cachedImg) {
+                offlineThumbnail = await cachedImg.text();
+              }
+            }
+          } catch (e) {
+            console.warn('[AudioEngine] Cache API lookup failed:', e);
+          }
+        }
+
+        // If local offline audio exists, play it 100% locally with HTML5 audio
+        if (offlineBlob) {
           console.log('[AudioEngine] Local downloaded track found. Playing offline...', trackMeta.title);
           if (audioRef.current) {
-            const localUrl = URL.createObjectURL(localTrack.audioBlob);
+            const localUrl = URL.createObjectURL(offlineBlob);
             activeEngineRef.current = 'audio';
             audioRef.current.src = localUrl;
             audioRef.current.volume = volume;
 
-            if (localTrack.thumbnailBlob) {
-              const localThumb = URL.createObjectURL(localTrack.thumbnailBlob);
-              setCurrentTrack(prev => prev ? { ...prev, thumbnail: localThumb } : prev);
+            if (offlineThumbnail) {
+              setCurrentTrack(prev => prev ? { ...prev, thumbnail: offlineThumbnail } : prev);
             }
 
             await audioRef.current.play();
             setIsPlaying(true);
             setIsLoading(false);
+            setError(null);
             return;
           }
         }
       } catch (err) {
-        console.warn('[AudioEngine] Failed to check or play local track:', err);
+        console.warn('[AudioEngine] Failed to check or play local offline track:', err);
       }
 
       // If network is offline and not downloaded, notify user
-      const isOfflineMode = !navigator.onLine;
+      const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
       if (isOfflineMode) {
-        setError("Hors-ligne : Ce titre n'est pas téléchargé.");
+        setError("Hors-ligne : Ce titre n'est pas disponible hors connexion.");
         setIsLoading(false);
         setIsPlaying(false);
         toast.error("Mode Hors-ligne : Veuillez sélectionner un titre téléchargé.", { icon: '✈️' });

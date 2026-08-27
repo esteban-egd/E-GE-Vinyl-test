@@ -83,17 +83,19 @@ export const AuthProvider = ({ children }) => {
       email: emailStr, 
       is_guest: true 
     };
+    const guestProfile = { 
+      full_name: fullNameStr, 
+      username: usernameStr,
+      avatar_url: avatarStr
+    };
     try {
       localStorage.setItem('ege_guest_user', JSON.stringify(guest));
+      localStorage.setItem('ege_guest_profile', JSON.stringify(guestProfile));
     } catch (err) {
       console.warn('[Auth] LocalStorage error for guest user:', err);
     }
     setUser(guest);
-    setProfile({ 
-      full_name: fullNameStr, 
-      username: usernameStr,
-      avatar_url: avatarStr
-    });
+    setProfile(guestProfile);
   };
 
   const value = {

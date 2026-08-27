@@ -32,6 +32,7 @@ import {
   getMainArtistName,
   isJunkArtist
 } from '../services/musicDataService';
+import { formatListeners, formatListenersShort, formatPlayCount, parseListenersCount } from '../utils/formatListeners';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import TrackImage from '../components/common/TrackImage';
 import { SearchSkeleton } from '../components/search/SearchSkeleton';
@@ -70,11 +71,19 @@ export default function SearchPage() {
     return spotifyRegion === 'france' ? SPOTIFY_TOP_50_FRANCE : SPOTIFY_TOP_50_GLOBAL;
   }, [spotifyRegion]);
 
-  const handlePlay = (track) => {
-    if (currentTrack?.videoId === track.videoId) {
+  const handlePlay = (track, list = null, idx = -1) => {
+    if (currentTrack?.videoId === track.videoId || (currentTrack?.title === track.title && currentTrack?.artist === track.artist)) {
       togglePlayPause();
     } else {
-      play(track);
+      if (list && list.length > 0) {
+        const foundIdx = idx >= 0 ? idx : list.findIndex(t => (t.videoId && t.videoId === track.videoId) || t.title === track.title);
+        setQueueAndPlay(list, foundIdx >= 0 ? foundIdx : 0);
+      } else if (results.tracks && results.tracks.length > 0) {
+        const foundIdx = results.tracks.findIndex(t => (t.videoId && t.videoId === track.videoId) || t.title === track.title);
+        setQueueAndPlay(results.tracks, foundIdx >= 0 ? foundIdx : 0);
+      } else {
+        play(track);
+      }
     }
   };
 
@@ -544,7 +553,7 @@ export default function SearchPage() {
                         )}
                       </div>
                       <span className="text-xs text-gray-400 font-medium truncate mt-0.5">
-                        {artist.genre || 'Artiste'}
+                        {artist.genre || 'Artiste'} {artist.nbFans ? `• ${formatListenersShort(artist.nbFans)}` : ''}
                       </span>
                     </div>
                   ))}
@@ -825,7 +834,7 @@ export default function SearchPage() {
                               </h3>
 
                               <p className="text-xs text-gray-300 mt-1 truncate font-medium">
-                                {topMatch.data.genre || 'Artiste'} {topMatch.data.nbFans ? `• ${(topMatch.data.nbFans / 1000).toFixed(0)}k fans` : ''}
+                                {topMatch.data.genre || 'Artiste'} {topMatch.data.nbFans ? `• ${formatListenersShort(topMatch.data.nbFans)}` : ''}
                               </p>
                             </div>
                           </div>
@@ -850,7 +859,7 @@ export default function SearchPage() {
                       /* 🎵 CARTE HERO TITRE */
                       <div 
                         id="search-hero-track-card"
-                        onClick={() => handlePlay(topMatch.data)}
+                        onClick={() => handlePlay(topMatch.data, results.tracks)}
                         className="group relative p-6 rounded-3xl bg-[#14110c] hover:bg-[#1a160f] border border-white/10 hover:border-white/20 transition-all duration-300 cursor-pointer overflow-hidden shadow-2xl flex flex-col justify-between hover:shadow-black/60 hover:-translate-y-0.5 active:scale-[0.99]"
                         style={{
                           background: `linear-gradient(145deg, ${currentTheme.bgAccent} 0%, #14110c 100%)`
@@ -869,7 +878,7 @@ export default function SearchPage() {
                                   className="w-12 h-12 rounded-full flex items-center justify-center shadow-2xl transition-transform active:scale-90"
                                   style={{ backgroundColor: currentTheme.primary, color: '#000000' }}
                                 >
-                                  {isCurrentTrackPlaying(topMatch.data.videoId) ? (
+                                  {isCurrentTrack(topMatch.data) && isPlaying ? (
                                     <Pause size={22} fill="currentColor" />
                                   ) : (
                                     <Play size={22} fill="currentColor" className="ml-0.5" />
@@ -925,7 +934,7 @@ export default function SearchPage() {
                               e.stopPropagation();
                               toggleLike(topMatch.data);
                             }}
-                            className="px-3.5 py-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition-all flex items-center gap-1.5 border border-white/10 active:scale-95"
+                            className="px-3.5 py-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition-all flex items-center gap-1.5 border border-white/10 active:scale-95 cursor-pointer"
                           >
                             <Heart size={15} className={isLiked(topMatch.data) ? 'fill-red-500 text-red-500' : 'text-gray-400'} />
                             <span className={isLiked(topMatch.data) ? 'text-red-400 font-bold text-xs' : 'text-xs font-medium'}>
@@ -945,12 +954,15 @@ export default function SearchPage() {
                           <TrendingUp size={15} style={{ color: currentTheme.primary }} />
                         </div>
                         <h2 className="text-sm font-bold text-white uppercase tracking-wider">
-                          {topMatch.type === 'artist' ? `Titres de ${topMatch.data.name}` : 'Top Titres'}
+                          {topMatch.type === 'artist' ? `Titres de ${topMatch.data.name}` : 'Titres'}
                         </h2>
                       </div>
-                      <span className="text-xs text-gray-500 font-mono">
-                        {topMatchTracks.length} morceaux
-                      </span>
+                      <button
+                        onClick={() => setActiveFilter('tracks')}
+                        className="text-xs text-gray-400 hover:text-white transition-colors cursor-pointer"
+                      >
+                        Voir tous les titres ({results.tracks?.length || 0})
+                      </button>
                     </div>
 
                     <div className="space-y-2">
@@ -963,7 +975,7 @@ export default function SearchPage() {
                         return (
                           <div
                             key={`top-track-${track.videoId || track.id}-${i}`}
-                            onClick={() => handlePlay(track)}
+                            onClick={() => handlePlay(track, topMatchTracks, i)}
                             className={`group flex items-center gap-3.5 p-2.5 md:p-3 rounded-2xl border transition-all duration-200 cursor-pointer min-h-[56px] ${
                               isThisActive
                                 ? 'shadow-md ring-1'
@@ -1048,122 +1060,6 @@ export default function SearchPage() {
                     </div>
                   </div>
                 </div>
-              )}
-
-              {/* 2. SECTION INTERMÉDIAIRE : TITRES LES PLUS PERTINENTS */}
-              {topMatchTracks.length > 0 && (
-                <section aria-label="Titres les plus pertinents" className="pt-4 border-t border-white/5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${currentTheme.primary}20` }}>
-                        <TrendingUp size={15} style={{ color: currentTheme.primary }} />
-                      </div>
-                      <h2 className="text-sm font-bold text-white uppercase tracking-wider">
-                        {topMatch?.type === 'artist' ? `Titres les plus écoutés de ${topMatch.data.name}` : 'Titres les plus pertinents'}
-                      </h2>
-                    </div>
-                    <button
-                      onClick={() => setActiveFilter('tracks')}
-                      className="text-xs text-gray-400 hover:text-white transition-colors"
-                    >
-                      Voir tous les titres ({results.tracks?.length || 0})
-                    </button>
-                  </div>
-
-                  <div className="space-y-2">
-                    {topMatchTracks.map((track, i) => {
-                      const isThisActive = isCurrentTrack(track);
-                      const isThisPlaying = isThisActive && isPlaying;
-                      const isThisLoading = isThisActive && isLoading;
-                      const liked = isLiked(track);
-
-                      return (
-                        <div
-                          key={`top-track-${track.videoId || track.id}-${i}`}
-                          onClick={() => handlePlay(track)}
-                          className={`group flex items-center gap-3.5 p-2.5 md:p-3 rounded-2xl border transition-all duration-200 cursor-pointer min-h-[56px] ${
-                            isThisActive
-                              ? 'shadow-md ring-1'
-                              : 'bg-[#14110c] hover:bg-[#1c1812] border-white/5 hover:border-white/15 hover:-translate-y-0.5'
-                          }`}
-                          style={isThisActive ? {
-                            backgroundColor: `${currentTheme?.primary || '#1ED760'}18`,
-                            borderColor: `${currentTheme?.primary || '#1ED760'}45`,
-                            boxShadow: `0 4px 14px ${currentTheme?.glow || 'rgba(30, 215, 96, 0.15)'}`
-                          } : {}}
-                        >
-                          <div className="w-6 flex items-center justify-center shrink-0">
-                            <span 
-                              className="text-xs font-mono font-bold group-hover:hidden"
-                              style={{ color: isThisActive ? (currentTheme?.primary || '#1ED760') : '#6b7280' }}
-                            >
-                              {i + 1}
-                            </span>
-                            <div className="hidden group-hover:flex items-center justify-center">
-                              {isThisPlaying ? (
-                                <Pause size={15} style={{ color: currentTheme?.primary || '#1ED760' }} fill="currentColor" />
-                              ) : (
-                                <Play size={15} className="text-white" fill="currentColor" />
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="relative w-12 h-12 shrink-0 rounded-xl overflow-hidden border border-white/10 shadow-sm">
-                            <TrackImage src={track.thumbnail} alt={track.title} className="w-full h-full object-cover" />
-                            {isThisLoading && (
-                              <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                                <div className="w-4 h-4 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
-                              </div>
-                            )}
-                            {isThisPlaying && !isThisLoading && (
-                              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                                <div className="flex items-end gap-0.5 h-3">
-                                  <span className="w-1 animate-bounce rounded-full h-full" style={{ backgroundColor: currentTheme?.primary }} />
-                                  <span className="w-1 animate-bounce rounded-full h-2/3 delay-75" style={{ backgroundColor: currentTheme?.primary }} />
-                                  <span className="w-1 animate-bounce rounded-full h-4/5 delay-150" style={{ backgroundColor: currentTheme?.primary }} />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex-1 min-w-0">
-                            <p 
-                              className="text-sm font-semibold truncate group-hover:text-white"
-                              style={{ color: isThisActive ? (currentTheme?.primary || '#1ED760') : '#f1f5f9', fontWeight: isThisActive ? 'bold' : '600' }}
-                            >
-                              {track.cleanTitle || track.title}
-                            </p>
-                            <p 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigate(`/artist/${encodeURIComponent(getMainArtistName(track.artist))}`);
-                              }}
-                              className="text-xs text-gray-400 truncate hover:underline hover:text-gray-200 cursor-pointer mt-0.5"
-                            >
-                              {getMainArtistName(track.artist)}
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-2 md:gap-3 shrink-0">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleLike(track);
-                              }}
-                              className={`p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full hover:bg-white/10 transition-all ${liked ? 'opacity-100' : 'opacity-80 md:opacity-0 md:group-hover:opacity-100 text-gray-400 hover:text-white'}`}
-                              title={liked ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-                            >
-                              <Heart size={16} className={liked ? 'fill-red-500 text-red-500' : ''} />
-                            </button>
-                            <span className="text-xs font-mono text-gray-500 pr-1">
-                              {formatDuration(track.duration)}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
               )}
 
             </div>

@@ -347,6 +347,7 @@ async function startServer() {
   });
 
   // Proxy Innertube WEB_REMIX API (E-GE Vinyl extraction)
+  // Proxy Innertube WEB_REMIX API (E-GE Vinyl extraction)
   app.post("/api/innertube-player", async (req, res) => {
     try {
       const { videoId } = req.body;
@@ -388,6 +389,95 @@ async function startServer() {
       res.json(data);
     } catch (err: any) {
       console.error("[Server] Innertube proxy error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Dedicated Audio Stream / Download Proxy (CORS-free for offline caching)
+  app.get(["/api/audio-download", "/api/stream"], async (req, res) => {
+    try {
+      const id = (req.query.id as string) || (req.query.videoId as string);
+      const title = (req.query.title as string) || "";
+      const artist = (req.query.artist as string) || "";
+
+      if (!id && !title) {
+        return res.status(400).json({ error: "Missing video id or title" });
+      }
+
+      let audioStreamUrl: string | null = null;
+      let contentType = "audio/mpeg";
+
+      // 1. Try finding audio via Deezer first if title & artist are provided
+      if (title) {
+        const queryTerm = `${title} ${artist}`.trim();
+        try {
+          const dzRes = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(queryTerm)}&limit=1`, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            signal: AbortSignal.timeout(3500)
+          });
+          if (dzRes.ok) {
+            const dzData = await dzRes.json();
+            if (dzData?.data?.[0]?.preview) {
+              audioStreamUrl = dzData.data[0].preview;
+              contentType = "audio/mpeg";
+            }
+          }
+        } catch (e: any) {
+          console.warn("[Server] Deezer stream lookup failed:", e.message);
+        }
+      }
+
+      // 2. If no Deezer match and video ID is present, try Invidious & Cobalt
+      if (!audioStreamUrl && id) {
+        const invidiousInstances = [
+          "https://inv.nadeko.net",
+          "https://invidious.nerdvpn.de",
+          "https://invidious.no-valis.fr",
+          "https://invidious.jing.rocks"
+        ];
+
+        for (const inst of invidiousInstances) {
+          try {
+            const invRes = await fetch(`${inst}/api/v1/videos/${id}`, {
+              signal: AbortSignal.timeout(3000)
+            });
+            if (invRes.ok) {
+              const invData = await invRes.json();
+              const format = invData.adaptiveFormats?.find((f: any) => f.mimeType?.startsWith("audio/"));
+              if (format?.url) {
+                audioStreamUrl = format.url;
+                contentType = format.mimeType || "audio/webm";
+                break;
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!audioStreamUrl) {
+        return res.status(404).json({ error: "No audio stream available for offline caching" });
+      }
+
+      // Fetch the binary audio and pipe with correct headers
+      const audioFetch = await fetch(audioStreamUrl, {
+        headers: { "User-Agent": "Mozilla/5.0" }
+      });
+
+      if (!audioFetch.ok) {
+        return res.status(audioFetch.status).json({ error: "Failed to fetch audio stream source" });
+      }
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      if (audioFetch.headers.get("content-length")) {
+        res.setHeader("Content-Length", audioFetch.headers.get("content-length")!);
+      }
+
+      const arrayBuffer = await audioFetch.arrayBuffer();
+      res.end(Buffer.from(arrayBuffer));
+    } catch (err: any) {
+      console.error("[Server] Audio stream error:", err.message);
       res.status(500).json({ error: err.message });
     }
   });

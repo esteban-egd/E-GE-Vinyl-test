@@ -1668,14 +1668,7 @@ export async function getArtistDetails(artistName) {
       ? officialVisuals.banner
       : (isValidArtwork(dzArtist?.picture_xl) ? dzArtist.picture_xl : (albums[0]?.artwork || topTracks[0]?.thumbnail || avatar));
     
-    let monthlyListeners = '1.8M auditeurs mensuels';
-    if (dzArtist?.nb_fan) {
-      if (dzArtist.nb_fan > 1000000) {
-        monthlyListeners = `${(dzArtist.nb_fan / 1000000).toFixed(1)}M auditeurs mensuels`;
-      } else if (dzArtist.nb_fan > 1000) {
-        monthlyListeners = `${Math.round(dzArtist.nb_fan / 1000)}k auditeurs mensuels`;
-      }
-    }
+    const listenersCount = dzArtist?.nb_fan ? Number(dzArtist.nb_fan) : (officialVisuals?.listeners || 1800000);
 
     const artistObj = {
       name: dzArtist?.name || cleanName,
@@ -1689,9 +1682,12 @@ export async function getArtistDetails(artistName) {
         id: r.id,
         name: r.name,
         picture: r.picture_xl || r.picture_large || r.picture_medium || r.picture,
-        nb_fan: r.nb_fan
+        nb_fan: r.nb_fan,
+        nbFans: r.nb_fan
       })),
-      monthlyListeners
+      listeners: listenersCount,
+      nbFans: listenersCount,
+      monthlyListeners: listenersCount
     };
 
     memoryCache.set(cacheKey, artistObj);

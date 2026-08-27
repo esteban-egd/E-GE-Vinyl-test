@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useLikes } from '../hooks/useLikes';
 import { usePlaylists, usePlaylistTracks } from '../hooks/usePlaylists';
 import { useFollowedArtists } from '../hooks/useFollowedArtists';
@@ -10,6 +10,8 @@ import { useNavigate } from 'react-router-dom';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import AddToPlaylistModal from '../components/common/AddToPlaylistModal';
 import TrackImage from '../components/common/TrackImage';
+import DownloadBadge from '../components/common/DownloadBadge';
+import { getDownloadedTracks } from '../services/offlineStorageService';
 import { 
   SPOTIFY_TOP_50_GLOBAL, 
   SPOTIFY_TOP_50_FRANCE, 
@@ -36,7 +38,10 @@ import {
   Download,
   X,
   ShieldCheck,
-  ArrowLeft
+  ArrowLeft,
+  ArrowDownCircle,
+  Loader2,
+  Check
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
@@ -74,10 +79,11 @@ export default function LibraryPage() {
   const { likedTracks } = useLikes();
   const { playlists, createPlaylist } = usePlaylists();
   const { followedArtists } = useFollowedArtists();
+  const { downloadedTrackIds } = useOffline();
 
   // Navigation and Filter States
-  const [activePill, setActivePill] = useState('LIKES'); // Default directly to 'LIKES' as requested
-  const [viewMode, setViewMode] = useState('list'); // Default to list view ('list' | 'grid') as requested
+  const [activePill, setActivePill] = useState('LIKES'); // Default directly to 'LIKES'
+  const [viewMode, setViewMode] = useState('list'); // Default to list view ('list' | 'grid')
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('recent'); // 'recent' | 'alphabetical' | 'creator'
 
@@ -85,6 +91,16 @@ export default function LibraryPage() {
   const [selectedPlaylistDetail, setSelectedPlaylistDetail] = useState({ type: 'likes' });
   const [showCreatePlaylistModal, setShowCreatePlaylistModal] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [downloadedTracksList, setDownloadedTracksList] = useState([]);
+
+  // Load offline tracks from Dexie whenever downloadedTrackIds change
+  useEffect(() => {
+    let isMounted = true;
+    getDownloadedTracks().then(tracks => {
+      if (isMounted) setDownloadedTracksList(tracks);
+    }).catch(() => {});
+    return () => { isMounted = false; };
+  }, [downloadedTrackIds]);
 
   // Primary Theme Accent Color (Defaulting to Spotify Green #1DB954)
   const primaryColor = currentTheme?.primary || '#1DB954';
@@ -175,6 +191,16 @@ export default function LibraryPage() {
             <div className="w-px h-8 bg-white/10" />
 
             <div className="text-center px-2">
+              <div className="text-lg sm:text-2xl font-black text-emerald-400 flex items-center justify-center gap-1">
+                <ArrowDownCircle size={16} className="text-emerald-400" />
+                <span>{downloadedTracksList.length}</span>
+              </div>
+              <span className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Téléchargés</span>
+            </div>
+
+            <div className="w-px h-8 bg-white/10" />
+
+            <div className="text-center px-2">
               <div className="text-lg sm:text-2xl font-black text-white flex items-center justify-center gap-1">
                 <ListMusic size={16} style={{ color: primaryColor }} />
                 <span>{playlists.length}</span>
@@ -210,6 +236,29 @@ export default function LibraryPage() {
               primaryColor={primaryColor} 
             />
             <PillButton 
+              active={activePill === 'LIKES'} 
+              onClick={() => {
+                setActivePill('LIKES');
+                setSelectedPlaylistDetail({ type: 'likes' });
+              }} 
+              label="Titres Likés" 
+              count={likedTracks.length}
+              primaryColor={primaryColor} 
+              icon={Heart}
+            />
+            <PillButton 
+              active={activePill === 'DOWNLOADED'} 
+              onClick={() => {
+                setActivePill('DOWNLOADED');
+                setSelectedPlaylistDetail({ type: 'downloaded' });
+              }} 
+              label="Téléchargés" 
+              count={downloadedTracksList.length}
+              primaryColor="#10B981" 
+              icon={ArrowDownCircle}
+              isDownloadedPill
+            />
+            <PillButton 
               active={activePill === 'PLAYLISTS'} 
               onClick={() => {
                 setActivePill('PLAYLISTS');
@@ -228,17 +277,6 @@ export default function LibraryPage() {
               label="Artistes" 
               count={followedArtists.length}
               primaryColor={primaryColor} 
-            />
-            <PillButton 
-              active={activePill === 'LIKES'} 
-              onClick={() => {
-                setActivePill('LIKES');
-                setSelectedPlaylistDetail({ type: 'likes' });
-              }} 
-              label="Titres Likés" 
-              count={likedTracks.length}
-              primaryColor={primaryColor} 
-              icon={Heart}
             />
           </div>
 
@@ -312,7 +350,7 @@ export default function LibraryPage() {
         )}
       </div>
 
-      {/* 3. AFFICHAGE DE LA BIBLIOTHÈQUE : VUE DÉTAILLÉE INLINE (TITRES LIKÉS / PLAYLIST) OU LISTE GLOBALE */}
+      {/* 3. AFFICHAGE DE LA BIBLIOTHÈQUE : VUE DÉTAILLÉE INLINE OU LISTE GLOBALE */}
       {selectedPlaylistDetail ? (
         <SpotifyPlaylistInlineDetail
           detailObj={selectedPlaylistDetail}
@@ -329,11 +367,16 @@ export default function LibraryPage() {
           searchQuery={searchQuery}
           sortBy={sortBy}
           likedTracks={likedTracks}
+          downloadedTracks={downloadedTracksList}
           playlists={playlists}
           followedArtists={followedArtists}
           onSelectLikes={() => {
             setActivePill('LIKES');
             setSelectedPlaylistDetail({ type: 'likes' });
+          }}
+          onSelectDownloaded={() => {
+            setActivePill('DOWNLOADED');
+            setSelectedPlaylistDetail({ type: 'downloaded' });
           }}
           onSelectPlaylist={(pl) => setSelectedPlaylistDetail({ type: 'playlist', data: pl })}
           primaryColor={primaryColor}
@@ -402,20 +445,31 @@ export default function LibraryPage() {
 }
 
 // --- PILL BUTTON COMPONENT ---
-function PillButton({ active, onClick, label, count, icon: Icon }) {
+function PillButton({ active, onClick, label, count, icon: Icon, isDownloadedPill }) {
   return (
     <button
       onClick={onClick}
       className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 whitespace-nowrap border ${
         active 
-          ? 'bg-white text-black border-white shadow-lg' 
+          ? (isDownloadedPill ? 'bg-emerald-400 text-black border-emerald-400 shadow-lg' : 'bg-white text-black border-white shadow-lg')
           : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10 hover:text-white'
       }`}
     >
-      {Icon && <Icon size={14} className={active ? 'text-black fill-black' : 'text-red-500 fill-red-500'} />}
+      {Icon && (
+        <Icon 
+          size={14} 
+          className={
+            active 
+              ? 'text-black fill-black' 
+              : isDownloadedPill 
+                ? 'text-emerald-400' 
+                : 'text-red-500 fill-red-500'
+          } 
+        />
+      )}
       <span>{label}</span>
       {count !== undefined && (
-        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-semibold ${active ? 'bg-black/15 text-black' : 'bg-white/10 text-gray-400'}`}>
+        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-semibold ${active ? 'bg-black/20 text-black' : 'bg-white/10 text-gray-400'}`}>
           {count}
         </span>
       )}
@@ -430,9 +484,11 @@ function MainLibraryContent({
   searchQuery, 
   sortBy, 
   likedTracks, 
+  downloadedTracks,
   playlists, 
   followedArtists, 
   onSelectLikes, 
+  onSelectDownloaded,
   onSelectPlaylist,
   primaryColor
 }) {
@@ -455,7 +511,20 @@ function MainLibraryContent({
       });
     }
 
-    // 2. Playlists
+    // 2. Downloaded Tracks Card
+    if (activePill === 'ALL' || activePill === 'DOWNLOADED') {
+      items.push({
+        id: 'downloaded-tracks-pinned',
+        isDownloaded: true,
+        name: 'Titres téléchargés',
+        subtitle: `Stockage local • ${downloadedTracks.length} titres`,
+        cover: null,
+        count: downloadedTracks.length,
+        creator: 'Hors-ligne'
+      });
+    }
+
+    // 3. Playlists
     if (activePill === 'ALL' || activePill === 'PLAYLISTS') {
       playlists.forEach(pl => {
         items.push({
@@ -470,7 +539,7 @@ function MainLibraryContent({
       });
     }
 
-    // 3. Followed Artists
+    // 4. Followed Artists
     if (activePill === 'ALL' || activePill === 'ARTISTS') {
       followedArtists.forEach(art => {
         items.push({
@@ -499,7 +568,7 @@ function MainLibraryContent({
     }
 
     return items;
-  }, [activePill, searchQuery, sortBy, likedTracks, playlists, followedArtists]);
+  }, [activePill, searchQuery, sortBy, likedTracks, downloadedTracks, playlists, followedArtists]);
 
   if (filteredItems.length === 0) {
     return (
@@ -541,6 +610,38 @@ function MainLibraryContent({
                   <div 
                     className="w-11 h-11 rounded-full text-black flex items-center justify-center shadow-2xl cursor-pointer hover:scale-105 active:scale-95 transition-transform"
                     style={{ backgroundColor: primaryColor }}
+                  >
+                    <Play size={20} fill="currentColor" className="ml-0.5 stroke-none" />
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (item.isDownloaded) {
+            return (
+              <div
+                key={item.id}
+                onClick={onSelectDownloaded}
+                className="relative aspect-square rounded-2xl p-4 bg-gradient-to-br from-emerald-800 via-teal-900 to-black hover:from-emerald-700 hover:to-teal-800 cursor-pointer border border-emerald-500/30 hover:border-emerald-400/50 transition-all duration-300 group flex flex-col justify-between shadow-xl hover:-translate-y-1"
+              >
+                <div className="w-12 h-12 rounded-full bg-emerald-500/20 backdrop-blur-md flex items-center justify-center text-emerald-400 border border-emerald-500/30 shadow-lg">
+                  <ArrowDownCircle size={24} />
+                </div>
+
+                <div>
+                  <h3 className="font-extrabold text-white text-base md:text-lg tracking-tight mb-1 group-hover:text-emerald-300 transition-colors">
+                    Téléchargés
+                  </h3>
+                  <p className="text-xs text-emerald-200/80 font-medium">
+                    {downloadedTracks.length} titres hors-ligne
+                  </p>
+                </div>
+
+                {/* Hover Play Button */}
+                <div className="absolute right-3 bottom-3 opacity-0 group-hover:opacity-100 transition-all transform translate-y-2 group-hover:translate-y-0">
+                  <div 
+                    className="w-11 h-11 rounded-full bg-emerald-400 text-black flex items-center justify-center shadow-2xl cursor-pointer hover:scale-105 active:scale-95 transition-transform"
                   >
                     <Play size={20} fill="currentColor" className="ml-0.5 stroke-none" />
                   </div>
@@ -630,6 +731,38 @@ function MainLibraryContent({
               <div className="flex items-center gap-3">
                 <button 
                   className="w-9 h-9 rounded-full bg-white/10 group-hover:bg-[#1DB954] group-hover:text-black text-white flex items-center justify-center transition-all shadow-md"
+                >
+                  <Play size={16} fill="currentColor" className="ml-0.5 stroke-none" />
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        if (item.isDownloaded) {
+          return (
+            <div
+              key={item.id}
+              onClick={onSelectDownloaded}
+              className="flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-emerald-950/50 via-teal-900/30 to-[#141414] border border-emerald-500/20 hover:border-emerald-500/40 transition-all cursor-pointer group"
+            >
+              <div className="flex items-center gap-4 min-w-0">
+                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center text-black shrink-0 shadow-md">
+                  <ArrowDownCircle size={22} className="text-black" />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-white text-sm truncate group-hover:text-emerald-300 transition-colors">
+                    Titres téléchargés
+                  </h4>
+                  <p className="text-xs text-emerald-400/80 font-medium">
+                    Stockage local 100% hors-ligne • {downloadedTracks.length} titres
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button 
+                  className="w-9 h-9 rounded-full bg-emerald-500/20 group-hover:bg-emerald-400 group-hover:text-black text-emerald-400 flex items-center justify-center transition-all shadow-md"
                 >
                   <Play size={16} fill="currentColor" className="ml-0.5 stroke-none" />
                 </button>
@@ -791,12 +924,19 @@ function RecommendationsSection({ likedTracks, followedArtists, primaryColor }) 
 // --- SPOTIFY-STYLE DETAILED PLAYLIST INLINE VIEW ---
 function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
   const isLikes = detailObj.type === 'likes';
-  const customPlaylist = detailObj.data;
+  const isDownloaded = detailObj.type === 'downloaded';
+  const customPlaylist = detailObj.type === 'playlist' ? detailObj.data : null;
 
   const { likedTracks, toggleLike, isLiked } = useLikes();
   const playlistTracks = usePlaylistTracks(customPlaylist?.id);
   const { setQueueAndPlay, currentTrack, isPlaying, togglePlayPause } = useAudio();
-  const { toggleSync } = useOffline();
+  const { 
+    downloadedTrackIds, 
+    downloadTrack, 
+    removeTrack: removeDownloadedTrack, 
+    isDownloading, 
+    toggleSync 
+  } = useOffline();
   const { removeTrackFromPlaylist, updatePlaylistName } = usePlaylists();
   const { user } = useAuth();
 
@@ -804,19 +944,35 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(customPlaylist?.name || '');
   const [selectedTrackForPlaylist, setSelectedTrackForPlaylist] = useState(null);
+  const [offlineTracksList, setOfflineTracksList] = useState([]);
+
+  // Load offline tracks from Dexie if in downloaded view
+  useEffect(() => {
+    let isMounted = true;
+    getDownloadedTracks().then(tracks => {
+      if (isMounted) setOfflineTracksList(tracks);
+    }).catch(() => {});
+    return () => { isMounted = false; };
+  }, [downloadedTrackIds]);
 
   // Get current tracks
-  const rawTracks = isLikes ? likedTracks : (playlistTracks || []);
+  const rawTracks = useMemo(() => {
+    if (isDownloaded) return offlineTracksList;
+    if (isLikes) return likedTracks;
+    return playlistTracks || [];
+  }, [isDownloaded, isLikes, offlineTracksList, likedTracks, playlistTracks]);
+
   const formattedTracks = useMemo(() => {
     return rawTracks.map(t => ({
       ...t,
       videoId: t.videoId || t.video_id || t.id,
       title: t.title || 'Titre inconnu',
       artist: t.artist || 'Artiste inconnu',
-      thumbnail: t.thumbnail || t.artwork || '',
-      album: t.album || (isLikes ? 'Titres likés' : customPlaylist?.name)
+      thumbnail: t.thumbnailBase64 || t.thumbnail || t.artwork || '',
+      album: t.album || (isDownloaded ? 'Stockage Hors-Ligne' : isLikes ? 'Titres likés' : customPlaylist?.name),
+      duration: t.duration || 210
     }));
-  }, [rawTracks, isLikes, customPlaylist]);
+  }, [rawTracks, isDownloaded, isLikes, customPlaylist]);
 
   // Filter tracks
   const filteredTracks = useMemo(() => {
@@ -831,7 +987,7 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
     if (!filteredTracks.length) return;
     const tracksToPlay = shuffle ? [...filteredTracks].sort(() => Math.random() - 0.5) : filteredTracks;
     setQueueAndPlay(tracksToPlay, 0);
-    toast.success(`Lecture de ${isLikes ? 'vos titres likés' : customPlaylist?.name}`);
+    toast.success(`Lecture de ${isDownloaded ? 'vos titres téléchargés' : isLikes ? 'vos titres likés' : customPlaylist?.name}`);
   };
 
   const handleTrackClick = (track, idx) => {
@@ -856,7 +1012,7 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
     }
   };
 
-  const coverImage = isLikes 
+  const coverImage = (isLikes || isDownloaded) 
     ? null 
     : (customPlaylist?.cover || (formattedTracks.length > 0 ? formattedTracks[0].thumbnail : null));
 
@@ -866,9 +1022,11 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
       {/* Header Banner */}
       <div 
         className={`relative p-6 sm:p-8 border-b border-white/10 flex flex-col sm:flex-row items-center sm:items-end gap-6 shrink-0 ${
-          isLikes 
-            ? 'bg-gradient-to-b from-indigo-900 via-purple-900 to-[#121212]' 
-            : 'bg-gradient-to-b from-[#242424] to-[#121212]'
+          isDownloaded
+            ? 'bg-gradient-to-b from-emerald-900 via-teal-950 to-[#121212]'
+            : isLikes 
+              ? 'bg-gradient-to-b from-indigo-900 via-purple-900 to-[#121212]' 
+              : 'bg-gradient-to-b from-[#242424] to-[#121212]'
         }`}
       >
         <button
@@ -882,7 +1040,11 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
 
           {/* Cover */}
           <div className="relative w-40 h-40 sm:w-48 sm:h-48 rounded-2xl overflow-hidden shadow-2xl border border-white/15 shrink-0 bg-black/40 flex items-center justify-center">
-            {isLikes ? (
+            {isDownloaded ? (
+              <div className="w-full h-full bg-gradient-to-br from-emerald-500 via-teal-600 to-emerald-900 flex items-center justify-center text-black">
+                <ArrowDownCircle size={64} className="text-white drop-shadow-lg" />
+              </div>
+            ) : isLikes ? (
               <div className="w-full h-full bg-gradient-to-br from-indigo-600 via-purple-600 to-indigo-900 flex items-center justify-center text-white">
                 <Heart size={64} className="fill-white drop-shadow-lg" />
               </div>
@@ -895,11 +1057,19 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
 
           {/* Info */}
           <div className="flex-1 text-center sm:text-left space-y-3 z-10 min-w-0">
-            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#1DB954] bg-[#1DB954]/10 border border-[#1DB954]/30 px-3 py-1 rounded-full">
-              {isLikes ? 'COLLECTION PRIVÉE' : 'PLAYLIST UTILISATEUR'}
+            <span className={`text-[10px] font-mono font-bold uppercase tracking-widest px-3 py-1 rounded-full border ${
+              isDownloaded
+                ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                : 'text-[#1DB954] bg-[#1DB954]/10 border-[#1DB954]/30'
+            }`}>
+              {isDownloaded ? 'STOCKAGE LOCAL HORS-LIGNE (MODE AVION)' : isLikes ? 'COLLECTION PRIVÉE' : 'PLAYLIST UTILISATEUR'}
             </span>
 
-            {isLikes ? (
+            {isDownloaded ? (
+              <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight">
+                Titres Téléchargés
+              </h1>
+            ) : isLikes ? (
               <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight">
                 Titres Likés
               </h1>
@@ -937,6 +1107,14 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
               <span>{formattedTracks.length} titre(s)</span>
               <span>•</span>
               <span>{totalDurationStr}</span>
+              {isDownloaded && (
+                <>
+                  <span>•</span>
+                  <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                    <Check size={14} /> 100% Autonome
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -948,9 +1126,11 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
             <button
               onClick={() => handlePlayAll(false)}
               disabled={formattedTracks.length === 0}
-              className="w-12 h-12 rounded-full text-black flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 disabled:opacity-50 transition-all cursor-pointer"
-              style={{ backgroundColor: primaryColor }}
-              title="Tout lire"
+              className={`w-12 h-12 rounded-full text-black flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 disabled:opacity-50 transition-all cursor-pointer ${
+                isDownloaded ? 'bg-emerald-400 hover:bg-emerald-300' : ''
+              }`}
+              style={{ backgroundColor: isDownloaded ? undefined : primaryColor }}
+              title={isDownloaded ? "Tout lire hors-ligne" : "Tout lire"}
             >
               <Play size={22} fill="currentColor" className="ml-0.5 stroke-none" />
             </button>
@@ -965,11 +1145,15 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
               <Shuffle size={18} />
             </button>
 
-            {/* Download Button */}
+            {/* Download/Sync Button */}
             <button
               onClick={() => toggleSync(formattedTracks)}
-              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all cursor-pointer"
-              title="Télécharger la playlist"
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                isDownloaded 
+                  ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' 
+                  : 'bg-white/10 hover:bg-white/20 text-white'
+              }`}
+              title="Télécharger la sélection"
             >
               <Download size={18} />
             </button>
@@ -1010,17 +1194,26 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
           </div>
 
           {filteredTracks.length === 0 ? (
-            <div className="text-center text-gray-500 py-16 text-xs">
-              Aucun titre trouvé dans cette liste.
+            <div className="text-center text-gray-500 py-16 text-xs space-y-2">
+              <ArrowDownCircle size={32} className="mx-auto text-gray-600" />
+              <p>Aucun titre trouvé dans cette liste.</p>
+              {isDownloaded && (
+                <p className="text-[11px] text-gray-400">
+                  Cliquez sur l'icône de téléchargement dans vos "Titres Likés" pour les rendre disponibles hors-ligne.
+                </p>
+              )}
             </div>
           ) : (
             filteredTracks.map((track, idx) => {
-              const isCurrent = currentTrack?.videoId === track.videoId || currentTrack?.title === track.title;
+              const trackId = track.videoId || track.id;
+              const isCurrent = currentTrack?.videoId === trackId || currentTrack?.title === track.title;
               const isThisPlaying = isCurrent && isPlaying;
+              const isTrackDownloadedInCache = downloadedTrackIds.has(trackId);
+              const isDownloadingThis = isDownloading.has(trackId);
 
               return (
                 <div
-                  key={`drawer-tr-${track.videoId}-${idx}`}
+                  key={`drawer-tr-${trackId}-${idx}`}
                   onClick={() => handleTrackClick(track, idx)}
                   className={`grid grid-cols-12 items-center p-2.5 rounded-xl transition-all duration-200 cursor-pointer group ${
                     isCurrent 
@@ -1050,10 +1243,13 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
                       </div>
                     </div>
 
-                    <div className="min-w-0">
-                      <p className={`text-xs font-bold truncate ${isCurrent ? 'text-[#1DB954]' : 'text-white group-hover:text-[#1DB954]'}`}>
-                        {track.title}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <p className={`text-xs font-bold truncate ${isCurrent ? 'text-[#1DB954]' : 'text-white group-hover:text-[#1DB954]'}`}>
+                          {track.title}
+                        </p>
+                        <DownloadBadge videoId={trackId} />
+                      </div>
                       <p className="text-[11px] text-gray-400 truncate mt-0.5">
                         {track.artist}
                       </p>
@@ -1067,13 +1263,39 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
 
                   {/* Date added */}
                   <div className="hidden sm:block sm:col-span-2 text-right text-xs text-gray-400">
-                    {formatDateAdded(track.created_at || track.likedAt)}
+                    {formatDateAdded(track.downloadedAt || track.created_at || track.likedAt)}
                   </div>
 
                   {/* Duration & Actions */}
                   <div className="col-span-5 sm:col-span-1 flex items-center justify-end gap-2 text-xs font-mono text-gray-400">
                     <span>{formatDuration(track.duration)}</span>
                     
+                    {/* Individual Download / Remove Offline Action */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isTrackDownloadedInCache) {
+                          removeDownloadedTrack(trackId);
+                        } else {
+                          downloadTrack(track);
+                        }
+                      }}
+                      disabled={isDownloadingThis}
+                      className="p-1 hover:scale-110 transition-transform"
+                      title={isTrackDownloadedInCache ? 'Retirer du stockage hors-ligne' : 'Télécharger en local'}
+                    >
+                      {isDownloadingThis ? (
+                        <Loader2 size={15} className="text-[#1DB954] animate-spin" />
+                      ) : isTrackDownloadedInCache ? (
+                        <div className="w-4 h-4 rounded-full bg-emerald-500 text-black flex items-center justify-center">
+                          <Check size={10} strokeWidth={3.5} />
+                        </div>
+                      ) : (
+                        <Download size={15} className="text-gray-400 hover:text-white" />
+                      )}
+                    </button>
+
+                    {/* Like Action */}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1085,7 +1307,8 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
                       <Heart size={15} className={isLiked(track) ? 'text-red-500 fill-red-500' : 'text-gray-400 hover:text-white'} />
                     </button>
 
-                    {!isLikes && customPlaylist && (
+                    {/* Custom Playlist Remove Action */}
+                    {!isLikes && !isDownloaded && customPlaylist && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1093,6 +1316,20 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
                         }}
                         className="p-1 text-gray-400 hover:text-red-400"
                         title="Supprimer de la playlist"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
+
+                    {/* If in Downloaded View: Delete from offline cache */}
+                    {isDownloaded && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeDownloadedTrack(trackId);
+                        }}
+                        className="p-1 text-gray-400 hover:text-red-400"
+                        title="Supprimer du stockage hors-ligne"
                       >
                         <Trash2 size={15} />
                       </button>

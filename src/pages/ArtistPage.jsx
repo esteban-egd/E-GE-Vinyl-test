@@ -7,6 +7,7 @@ import { useFollowedArtists } from '../hooks/useFollowedArtists';
 import { useTheme } from '../context/ThemeContext';
 import { useDominantColor } from '../hooks/useDominantColor';
 import { getArtistDetails, getMainArtistName, getAlbumTracks, safeDecodeURI, getArtistAvatar } from '../services/musicDataService';
+import { formatListeners, parseListenersCount } from '../utils/formatListeners';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import TrackImage from '../components/common/TrackImage';
 import DownloadBadge from '../components/common/DownloadBadge';
@@ -532,12 +533,18 @@ export default function ArtistPage() {
             {artist.name}
           </h1>
           {(() => {
-                 const count = artist.monthlyListeners !== undefined ? artist.monthlyListeners : artist.listeners;
-                 const formatted = (count !== undefined && count !== null && !isNaN(count)) 
-                   ? new Intl.NumberFormat('fr-FR').format(count) + ' auditeurs par mois' 
-                   : '';
-                 return formatted ? <p className="text-gray-300 text-sm font-medium drop-shadow-md"><span className="text-white font-bold text-base drop-shadow-md mr-1">{formatted}</span></p> : null;
-               })()}
+            const raw = artist.monthlyListeners !== undefined ? artist.monthlyListeners : artist.listeners;
+            const count = parseListenersCount(raw);
+            if (count > 0) {
+              const formatted = formatListeners(raw, { suffix: ' auditeurs par mois', singularSuffix: ' auditeur par mois' });
+              return (
+                <p className="text-gray-300 text-sm font-medium drop-shadow-md">
+                  <span className="text-white font-bold text-base drop-shadow-md mr-1">{formatted}</span>
+                </p>
+              );
+            }
+            return null;
+          })()}
         </div>
       </div>
 
@@ -811,7 +818,13 @@ export default function ArtistPage() {
                   <img src={artist.avatar} alt={artist.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#181818] via-[#181818]/40 to-transparent" />
                   <div className="absolute bottom-4 left-6">
-                    <div className="text-white font-bold text-xl drop-shadow-md">{new Intl.NumberFormat('fr-FR').format(artist.monthlyListeners || 0)} auditeurs</div>
+                    <div className="text-white font-bold text-xl drop-shadow-md">
+                      {formatListeners(artist.monthlyListeners || artist.listeners, { 
+                        suffix: ' auditeurs mensuels', 
+                        singularSuffix: ' auditeur mensuel', 
+                        fallback: 'Auditeurs en cours de calcul' 
+                      })}
+                    </div>
                   </div>
                 </div>
                 

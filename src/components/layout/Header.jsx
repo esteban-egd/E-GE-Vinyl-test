@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Download, User } from 'lucide-react';
+import { Download, User, Menu } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import ProfileModal from '../profile/ProfileModal';
 
-export default function Header() {
+export default function Header({ onOpenMobileMenu = () => {} }) {
   const { user, profile } = useAuth();
   const { currentTheme } = useTheme();
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -38,15 +38,26 @@ export default function Header() {
 
   return (
     <header 
-      className="flex items-center justify-between px-6 h-16 safe-top z-40 border-b border-white/5 transition-colors duration-300"
+      className="flex items-center justify-between px-4 sm:px-6 h-16 safe-top z-40 border-b border-white/5 transition-colors duration-300"
       style={{ backgroundColor: currentTheme.bg }}
     >
-      <Link to="/" className="flex items-center gap-1.5 md:hidden hover:opacity-80 transition-opacity">
-        <span className="text-display text-2xl font-black tracking-tighter uppercase" style={{ color: currentTheme.primary }}>E</span>
-        <span className="text-display text-xl font-light tracking-widest text-white uppercase">GE</span>
-      </Link>
+      <div className="flex items-center gap-3">
+        {/* Mobile Hamburger Menu Toggle */}
+        <button
+          onClick={onOpenMobileMenu}
+          className="md:hidden p-2 rounded-xl text-neutral-400 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/5 transition-all cursor-pointer flex items-center justify-center"
+          aria-label="Ouvrir le menu de navigation"
+        >
+          <Menu size={20} />
+        </button>
 
-      <div className="flex items-center gap-4">
+        <Link to="/" className="flex items-center gap-1.5 md:hidden hover:opacity-80 transition-opacity">
+          <span className="text-display text-2xl font-black tracking-tighter uppercase" style={{ color: currentTheme.primary }}>E</span>
+          <span className="text-display text-xl font-light tracking-widest text-white uppercase">GE</span>
+        </Link>
+      </div>
+
+      <div className="flex items-center gap-3 sm:gap-4">
         {isInstallable && (
           <button
             onClick={handleInstallClick}
@@ -61,7 +72,7 @@ export default function Header() {
         {user && (
           <Link
             to="/profile"
-            className="flex items-center gap-2.5 p-1.5 pr-3.5 rounded-full border transition-all group max-w-[200px] sm:max-w-none cursor-pointer hover:border-white/30"
+            className="flex items-center gap-2.5 p-1.5 pr-3.5 rounded-full border transition-all group max-w-[180px] sm:max-w-none cursor-pointer hover:border-white/30"
             style={{ backgroundColor: currentTheme.cardBg, borderColor: `${currentTheme.primary}40` }}
           >
             <div 
@@ -77,11 +88,18 @@ export default function Header() {
               )}
             </div>
             <div className="flex flex-col items-start leading-none min-w-0">
-              <span className="text-xs font-black text-white uppercase tracking-tighter truncate max-w-[110px] sm:max-w-xs">
-                {profile?.full_name || user.email?.split('@')[0] || 'Compte'}
-              </span>
-              <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5 truncate max-w-[110px] sm:max-w-xs" style={{ color: currentTheme.primary }}>
-                {profile?.username ? `@${profile.username.replace('@','')}` : 'Membre'}
+              <div className="flex items-center gap-1.5 max-w-[110px] sm:max-w-xs">
+                <span className="text-xs font-black text-white uppercase tracking-tighter truncate">
+                  {profile?.full_name || user.email?.split('@')[0] || 'Compte'}
+                </span>
+                {user?.is_guest && (
+                  <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-[#c29e5a]/20 text-[#e1bb72] font-mono font-bold border border-[#c29e5a]/40 shrink-0">
+                    INVITÉ
+                  </span>
+                )}
+              </div>
+              <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5 truncate max-w-[90px] sm:max-w-xs" style={{ color: currentTheme.primary }}>
+                {user?.is_guest ? 'Mode Démo' : (profile?.username ? `@${profile.username.replace('@','')}` : 'Membre')}
               </span>
             </div>
           </Link>
@@ -92,3 +110,4 @@ export default function Header() {
     </header>
   );
 }
+
