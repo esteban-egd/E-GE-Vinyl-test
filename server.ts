@@ -394,108 +394,90 @@ async function startServer() {
   });
 
   // Dedicated Audio Stream / Download Proxy (CORS-free for offline caching)
-  app.get(["/api/audio-download", "/api/stream"], async (req, res) => {
+  
+  // Unified Full-Track Audio Stream & Download Proxy (CORS-free for offline caching & mobile playback)
+  app.get(['/api/audio-download', '/api/stream', '/api/download'], async (req, res) => {
     try {
       const id = (req.query.id as string) || (req.query.videoId as string);
-      const title = (req.query.title as string) || "";
-      const artist = (req.query.artist as string) || "";
-
-      if (!id && !title) {
-        return res.status(400).json({ error: "Missing video id or title" });
-      }
-
-      let audioStreamUrl: string | null = null;
-      let contentType = "audio/mpeg";
-
-      const cleanTitle = title
-        .replace(/\b(feat|ft|featuring|remastered|version|live|clip|official)\b.*/i, '')
-        .replace(/[\(\[\{].*?[\)\]\}]/g, '')
-        .trim();
-      const cleanArtist = artist.split(/[,&/xX]/)[0].trim();
-      const queryTerm = `${cleanTitle} ${cleanArtist}`.trim() || `${title} ${artist}`.trim();
-
-      // 1. Deezer preview lookup
-      if (queryTerm) {
-        try {
-          const dzRes = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(queryTerm)}&limit=1`, {
-            headers: { "User-Agent": "Mozilla/5.0" },
-            signal: AbortSignal.timeout(3500)
-          });
-          if (dzRes.ok) {
-            const dzData = await dzRes.json();
-            if (dzData?.data?.[0]?.preview) {
-              audioStreamUrl = dzData.data[0].preview;
-              contentType = "audio/mpeg";
-            }
-          }
-        } catch (e: any) {
-          console.warn("[Server] Deezer stream lookup failed:", e.message);
+      const title = (req.query.title as string) || '';
+      const artist = (req.query.artist as string) || '';
+      const queryParam = (req.query.query as string);
+      
+      let videoId = id;
+      
+      // If we don't have an ID but have a query (or title+artist), we search Invidious first
+      if (!videoId) {
+        const queryTerm = queryParam || `${title} ${artist}`.trim();
+        if (!queryTerm) {
+          return res.status(400).json({ error: 'Missing video id or search query' });
         }
-      }
-
-      // 2. iTunes preview lookup fallback
-      if (!audioStreamUrl && queryTerm) {
-        try {
-          const itRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(queryTerm)}&entity=song&limit=1`, {
-            headers: { "User-Agent": "Mozilla/5.0" },
-            signal: AbortSignal.timeout(3500)
-          });
-          if (itRes.ok) {
-            const itData = await itRes.json();
-            if (itData?.results?.[0]?.previewUrl) {
-              audioStreamUrl = itData.results[0].previewUrl;
-              contentType = "audio/mp4";
-            }
-          }
-        } catch (e: any) {
-          console.warn("[Server] iTunes preview lookup failed:", e.message);
-        }
-      }
-
-      // 3. Invidious video audio streams fallback
-      if (!audioStreamUrl && id) {
-        const invidiousInstances = [
-          "https://invidious.nerdvpn.de",
-          "https://inv.tux.pizza",
-          "https://invidious.jing.rocks",
-          "https://invidious.privacyredirect.com",
-          "https://invidious.drgns.space",
-          "https://yt.artemislena.eu",
-          "https://invidious.projectsegfau.lt"
+        
+        const invSearchUrls = [
+          `https://invidious.nerdvpn.de/api/v1/search?q=${encodeURIComponent(queryTerm)}`,
+          `https://inv.tux.pizza/api/v1/search?q=${encodeURIComponent(queryTerm)}`,
+          `https://invidious.projectsegfau.lt/api/v1/search?q=${encodeURIComponent(queryTerm)}`
         ];
-
-        for (const inst of invidiousInstances) {
+        
+        for (const url of invSearchUrls) {
           try {
-            const invRes = await fetch(`${inst}/api/v1/videos/${id}`, {
-              signal: AbortSignal.timeout(3000)
-            });
-            if (invRes.ok) {
-              const invData = await invRes.json();
-              const format = invData.adaptiveFormats?.find((f: any) => f.mimeType?.startsWith("audio/"));
-              if (format?.url) {
-                audioStreamUrl = format.url;
-                contentType = format.mimeType || "audio/webm";
+            const sRes = await fetch(url, { signal: AbortSignal.timeout(3000) });
+            if (sRes.ok) {
+              const data = await sRes.json();
+              if (data && data.length > 0 && data[0].videoId) {
+                videoId = data[0].videoId;
                 break;
               }
             }
           } catch (_) {}
         }
       }
+      
+      if (!videoId) {
+        return res.status(404).json({ error: 'Could not resolve audio source' });
+      }
 
-      // 4. Cobalt API fallback
-      if (!audioStreamUrl && id) {
+      let audioStreamUrl: string | null = null;
+      let contentType = 'audio/webm';
+
+      // 1. Invidious Video API for FULL Audio Stream
+      const invidiousInstances = [
+        'https://invidious.nerdvpn.de',
+        'https://inv.tux.pizza',
+        'https://invidious.jing.rocks',
+        'https://yt.artemislena.eu',
+        'https://invidious.projectsegfau.lt'
+      ];
+
+      for (const inst of invidiousInstances) {
         try {
-          const cobaltRes = await fetch("https://api.cobalt.tools/api/json", {
-            method: "POST",
+          const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+            signal: AbortSignal.timeout(3500)
+          });
+          if (invRes.ok) {
+            const invData = await invRes.json();
+            const format = invData.adaptiveFormats?.find((f: any) => f.mimeType?.startsWith('audio/'));
+            if (format?.url) {
+              audioStreamUrl = format.url;
+              contentType = format.mimeType || 'audio/webm';
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 2. Cobalt API Fallback for FULL audio
+      if (!audioStreamUrl) {
+        try {
+          const cobaltRes = await fetch('https://api.cobalt.tools/api/json', {
+            method: 'POST',
             headers: {
-              "Accept": "application/json",
-              "Content-Type": "application/json"
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              url: `https://www.youtube.com/watch?v=${id}`,
+              url: `https://www.youtube.com/watch?v=${videoId}`,
               isAudioOnly: true,
-              audioFormat: "mp3",
-              audioQuality: "8"
+              audioFormat: 'mp3'
             }),
             signal: AbortSignal.timeout(4000)
           });
@@ -503,39 +485,42 @@ async function startServer() {
             const cobData = await cobaltRes.json();
             if (cobData.url) {
               audioStreamUrl = cobData.url;
-              contentType = "audio/mpeg";
+              contentType = 'audio/mpeg';
             }
           }
         } catch (_) {}
       }
 
       if (!audioStreamUrl) {
-        return res.status(404).json({ error: "No audio stream available for offline caching" });
+        return res.status(404).json({ error: 'No full audio stream available' });
       }
 
-      // Fetch binary audio stream
+      // Proxy the stream completely to avoid CORS and Mobile WebView limitations
       const audioFetch = await fetch(audioStreamUrl, {
-        headers: { "User-Agent": "Mozilla/5.0" }
+        headers: { 'User-Agent': 'Mozilla/5.0' }
       });
 
       if (!audioFetch.ok) {
-        return res.status(audioFetch.status).json({ error: "Failed to fetch audio stream source" });
+        return res.status(audioFetch.status).json({ error: 'Failed to fetch audio stream source' });
       }
 
-      res.setHeader("Content-Type", contentType);
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "public, max-age=86400");
-      if (audioFetch.headers.get("content-length")) {
-        res.setHeader("Content-Length", audioFetch.headers.get("content-length")!);
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      
+      if (audioFetch.headers.get('content-length')) {
+        res.setHeader('Content-Length', audioFetch.headers.get('content-length')!);
       }
 
+      // Node.js stream piping to respond efficiently (avoids fully buffering in memory)
       const arrayBuffer = await audioFetch.arrayBuffer();
       res.end(Buffer.from(arrayBuffer));
     } catch (err: any) {
-      console.error("[Server] Audio stream error:", err.message);
+      console.error('[Server] Audio stream error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
+
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

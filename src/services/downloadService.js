@@ -1,5 +1,5 @@
 import db from '../lib/db';
-import { getAudioStreamUrl } from './audioResolver';
+import { fetchFullAudioBlob } from './audioDownloadApi';
 
 export const CACHE_NAME_PRIMARY = 'offline-audio-v1';
 export const CACHE_NAME_LEGACY = 'ege-vinyl-audio-cache-v1';
@@ -214,45 +214,10 @@ export async function downloadTrack(track) {
     const title = track.title || '';
     const artist = track.artist || '';
 
-    // 1. Dedicated server proxy endpoint with CORS support
-    const serverUrl = `/api/audio-download?id=${encodeURIComponent(videoId)}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`;
-
-    try {
-      const srvRes = await fetch(serverUrl, { 
-        mode: 'cors',
-        signal: AbortSignal.timeout(10000) 
-      });
-      if (srvRes.ok) {
-        const b = await srvRes.blob();
-        if (b && b.size > 8000) {
-          audioBlob = b;
-          mimeType = srvRes.headers.get('content-type') || 'audio/mpeg';
-        }
-      }
-    } catch (e) {
-      console.warn('[DownloadService] Server download endpoint error:', e.message);
-    }
-
-    // 2. Direct stream resolvers via LyraAudio
-    if (!audioBlob || audioBlob.size < 8000) {
-      try {
-        const streamUrl = await getAudioStreamUrl(title, artist, videoId);
-        if (streamUrl && !streamUrl.startsWith('/api/stream')) {
-          const directRes = await fetch(streamUrl, { 
-            mode: 'cors',
-            signal: AbortSignal.timeout(8000) 
-          });
-          if (directRes.ok) {
-            const b = await directRes.blob();
-            if (b && b.size > 8000) {
-              audioBlob = b;
-              mimeType = directRes.headers.get('content-type') || 'audio/mpeg';
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[DownloadService] Lyra stream download error:', e.message);
-      }
+    const audioData = await fetchFullAudioBlob(title, artist, videoId);
+    if (audioData) {
+      audioBlob = audioData.blob;
+      mimeType = audioData.mimeType;
     }
 
     // Return false if all sources failed to provide a full audio stream
