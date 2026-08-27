@@ -302,18 +302,10 @@ function createWindow() {
         return { action: 'deny' };
     });
     // Load the app
-    const startUrl = electron_is_dev_1.default
-        ? 'http://localhost:3000'
-        : 'app://localhost/index.html';
+    
+    win.webContents.openDevTools();
     if (electron_is_dev_1.default) {
-        // TO OPEN DEVTOOLS UNCOMMENT NEXT LINE
-        win.webContents.openDevTools();
-        // The dev origin `http://localhost:3000` is shared by every
-        // StreamingCore-based app, across brands. Electron's HTTP
-        // cache, cachestorage, and service workers are keyed by origin — not by
-        // app — so a bundle cached by another app on the same origin can be
-        // re-served here. Wipe the dev-origin cache + service workers before
-        // loading so each launch always gets this app's fresh bundle.
+        const startUrl = 'http://localhost:3000';
         const ses = win.webContents.session;
         Promise.all([
             ses.clearCache(),
@@ -321,10 +313,12 @@ function createWindow() {
         ])
             .catch(() => { })
             .finally(() => { win?.loadURL(startUrl); });
+    } else {
+        const path = require('path');
+        const indexPath = path.join(electron_1.app.getAppPath(), 'dist', 'index.html');
+        win.loadFile(indexPath).catch(err => console.error('Erreur chargement index.html:', err));
     }
-    else {
-        win.loadURL(startUrl);
-    }
+  
     // Send any pending deep link once the page is loaded
     win.webContents.on('did-finish-load', () => {
         if (pendingDeepLink && win) {

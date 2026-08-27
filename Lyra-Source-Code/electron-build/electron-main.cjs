@@ -10696,8 +10696,17 @@ function createDesktopMain(opts) {
       }
     });
     bindWindowEvents2(_mainWindow);
-    const startUrl = dev ? "http://localhost:3000" : `${packagedProtocolScheme}://localhost/index.html`;
-    _mainWindow.loadURL(startUrl);
+    
+    _mainWindow.webContents.openDevTools();
+    if (dev) {
+      _mainWindow.loadURL("http://localhost:3000");
+    } else {
+      const path = require('path');
+      const { app } = require('electron');
+      const indexPath = path.join(app.getAppPath(), 'dist', 'index.html');
+      _mainWindow.loadFile(indexPath).catch(err => console.error('Erreur chargement index.html:', err));
+    }
+  
     _mainWindow.webContents.on("did-finish-load", () => {
       if (pendingDeepLink2 && _mainWindow && !_mainWindow.isDestroyed()) {
         _mainWindow.webContents.send("onDeepLinkReceived", pendingDeepLink2);
@@ -11783,9 +11792,10 @@ function createWindow() {
     if (/^https?:/i.test(url)) void import_electron20.shell.openExternal(url);
     return { action: "deny" };
   });
-  const startUrl = import_electron_is_dev.default ? "http://localhost:3000" : (import_electron20.app.isPackaged ? `file://${import_path7.default.join(__dirname, "dist", "index.html")}` : "app://localhost/index.html");
+  
+  win.webContents.openDevTools();
   if (import_electron_is_dev.default) {
-    win.webContents.openDevTools();
+    const startUrl = "http://localhost:3000";
     const ses = win.webContents.session;
     Promise.all([
       ses.clearCache(),
@@ -11795,8 +11805,10 @@ function createWindow() {
       win?.loadURL(startUrl);
     });
   } else {
-    win.loadURL(startUrl);
+    const indexPath = import_path7.default.join(import_electron20.app.getAppPath(), 'dist', 'index.html');
+    win.loadFile(indexPath).catch(err => console.error('Erreur chargement index.html:', err));
   }
+  
   win.webContents.on("did-finish-load", () => {
     if (pendingDeepLink && win) {
       win.webContents.send("onDeepLinkReceived", pendingDeepLink);
