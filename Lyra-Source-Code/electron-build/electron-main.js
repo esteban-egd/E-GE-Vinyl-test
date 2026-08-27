@@ -11783,7 +11783,7 @@ function createWindow() {
     if (/^https?:/i.test(url)) void import_electron20.shell.openExternal(url);
     return { action: "deny" };
   });
-  const startUrl = import_electron_is_dev.default ? "http://localhost:3000" : "app://localhost/index.html";
+  const startUrl = import_electron_is_dev.default ? "http://localhost:3000" : (import_electron20.app.isPackaged ?  : "app://localhost/index.html");
   if (import_electron_is_dev.default) {
     win.webContents.openDevTools();
     const ses = win.webContents.session;
