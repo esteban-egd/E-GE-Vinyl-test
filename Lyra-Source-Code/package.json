@@ -8,7 +8,7 @@
     "name": "e-ge-vinyl",
     "email": "support@ege-vinyl.vercel.app"
   },
-  "main": "electron-build/electron-main.js",
+  "main": "electron-build/electron-main.cjs",
   "dependencies": {
     "@aracna/core": "^1.5.0",
     "@aracna/fcm": "^1.0.33",

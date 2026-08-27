@@ -5,7 +5,7 @@
   "description": "E-GE Vinyl Player App",
   "author": "E-GE Vinyl",
   "type": "module",
-  "main": "Lyra-Source-Code/electron-build/electron-main.js",
+  "main": "Lyra-Source-Code/electron-build/electron-main.cjs",
   "build": {
     "appId": "com.egevinyl.app",
     "productName": "E-GE Vinyl",
