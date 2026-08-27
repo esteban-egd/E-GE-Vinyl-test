@@ -5,51 +5,6 @@ export const CACHE_NAME_PRIMARY = 'offline-audio-v1';
 export const CACHE_NAME_LEGACY = 'ege-vinyl-audio-cache-v1';
 const LOCAL_INDEX_KEY = 'ege-offline-tracks-index';
 
-/**
- * Helper to generate a small audio tone blob if all network sources fail (fail-safe for offline tests)
- */
-function generateFallbackAudioBlob() {
-  try {
-    const sampleRate = 44100;
-    const duration = 2; // 2 seconds
-    const numSamples = sampleRate * duration;
-    const buffer = new ArrayBuffer(44 + numSamples * 2);
-    const view = new DataView(buffer);
-
-    // RIFF chunk descriptor
-    const writeString = (offset, string) => {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-      }
-    };
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true); // PCM
-    view.setUint16(22, 1, true); // Mono
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, numSamples * 2, true);
-
-    // Write a gentle 440Hz sine wave fade
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
-      const amplitude = Math.sin(2 * Math.PI * 440 * t) * 0.15;
-      const sample = Math.max(-1, Math.min(1, amplitude)) * 0x7FFF;
-      view.setInt16(44 + i * 2, sample, true);
-    }
-
-    return new Blob([buffer], { type: 'audio/wav' });
-  } catch {
-    return new Blob(['\0'.repeat(1024)], { type: 'audio/mpeg' });
-  }
-}
 
 /**
  * Convert an image URL to a local Base64 string for 100% offline access
@@ -300,56 +255,10 @@ export async function downloadTrack(track) {
       }
     }
 
-    // 3. Direct Deezer preview search & download
+    // Return false if all sources failed to provide a full audio stream
     if (!audioBlob || audioBlob.size < 8000) {
-      try {
-        const q = `${title} ${artist}`.trim();
-        const dzRes = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=1`, {
-          signal: AbortSignal.timeout(4000)
-        });
-        if (dzRes.ok) {
-          const dzData = await dzRes.json();
-          if (dzData?.data?.[0]?.preview) {
-            const previewRes = await fetch(dzData.data[0].preview, { mode: 'cors' });
-            if (previewRes.ok) {
-              const b = await previewRes.blob();
-              if (b && b.size > 8000) {
-                audioBlob = b;
-                mimeType = 'audio/mpeg';
-              }
-            }
-          }
-        }
-      } catch (_) {}
-    }
-
-    // 4. iTunes AAC/M4A preview search & download
-    if (!audioBlob || audioBlob.size < 8000) {
-      try {
-        const q = `${title} ${artist}`.trim();
-        const itRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=song&limit=1`, {
-          signal: AbortSignal.timeout(4000)
-        });
-        if (itRes.ok) {
-          const itData = await itRes.json();
-          if (itData?.results?.[0]?.previewUrl) {
-            const previewRes = await fetch(itData.results[0].previewUrl, { mode: 'cors' });
-            if (previewRes.ok) {
-              const b = await previewRes.blob();
-              if (b && b.size > 8000) {
-                audioBlob = b;
-                mimeType = 'audio/mp4';
-              }
-            }
-          }
-        }
-      } catch (_) {}
-    }
-
-    // 5. Ultimate fail-safe fallback: generate clean offline placeholder tone
-    if (!audioBlob || audioBlob.size < 1000) {
-      audioBlob = generateFallbackAudioBlob();
-      mimeType = 'audio/wav';
+      console.warn('[DownloadService] Failed to fetch full audio stream. Download aborted.');
+      return false;
     }
 
     // Convert image to base64 for complete offline access
