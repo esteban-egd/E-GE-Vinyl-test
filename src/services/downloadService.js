@@ -1,5 +1,5 @@
 import db from '../lib/db';
-import { getLyraAudioStream } from './lyraAudio';
+import { getAudioStreamUrl } from './audioResolver';
 
 export const CACHE_NAME_PRIMARY = 'offline-audio-v1';
 export const CACHE_NAME_LEGACY = 'ege-vinyl-audio-cache-v1';
@@ -281,7 +281,7 @@ export async function downloadTrack(track) {
     // 2. Direct stream resolvers via LyraAudio
     if (!audioBlob || audioBlob.size < 8000) {
       try {
-        const streamUrl = await getLyraAudioStream(videoId, title, artist);
+        const streamUrl = await getAudioStreamUrl(title, artist, videoId);
         if (streamUrl && !streamUrl.startsWith('/api/stream')) {
           const directRes = await fetch(streamUrl, { 
             mode: 'cors',

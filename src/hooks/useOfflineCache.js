@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useLiveQuery } from './useLiveQuery';
 import db from '../lib/db';
-import { getLyraAudioStream } from '../services/lyraAudio';
+import { getAudioStreamUrl } from '../services/audioResolver';
 
 export function useOfflineCache() {
   const [downloading, setDownloading] = useState(new Set());
@@ -56,7 +56,7 @@ export function useOfflineCache() {
     let mimeType = 'audio/mp3';
 
     if (!streamUrl && trackId) {
-      streamUrl = await getLyraAudioStream(trackId, track.title, track.artist);
+      streamUrl = await getAudioStreamUrl(track.title, track.artist, trackId);
     }
 
     if (!streamUrl) {

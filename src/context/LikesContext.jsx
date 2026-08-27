@@ -5,6 +5,7 @@ import { getMainArtistName } from '../services/musicDataService';
 import { toast } from 'react-hot-toast';
 import db from '../lib/db';
 import { useOffline } from './OfflineContext';
+import { autoDownloadService } from '../services/autoDownloadService';
 
 const LikesContext = createContext();
 
@@ -52,6 +53,8 @@ export function LikesProvider({ children }) {
         });
 
         setLikedTracks(formatted);
+        // Start delta sync in background
+        autoDownloadService.deltaSyncLikedTracks(formatted);
       } else {
         // Fallback to local DB when offline
         const localLikes = await db.likes.toArray();
@@ -146,8 +149,8 @@ export function LikesProvider({ children }) {
           ...prev
         ]);
         toast.success('Ajouté aux favoris');
-        // Trigger offline sync if enabled
-        handleTrackLiked({ ...localItem, video_id: trackId, id: trackId });
+        // Trigger offline sync if enabled via autoDownloadService
+        autoDownloadService.handleTrackLiked({ ...localItem, video_id: trackId, id: trackId });
 
         if (navigator.onLine) {
           const itemToSave = {
