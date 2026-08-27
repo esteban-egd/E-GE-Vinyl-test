@@ -47,8 +47,8 @@ jobs:
         with:
           name: Windows-Executable
           path: |
-            dist/*.exe
-            dist/*.blockmap
+            release/*.exe
+            release/*.blockmap
 
   # ==========================================
   # BUILD ANDROID (.APK)
