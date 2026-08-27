@@ -619,23 +619,26 @@ export function useAudioPlayer() {
           }
         }
 
-        // 3. Try Browser Cache API (Service Worker Cache)
+        // 3. Try Browser Cache API (offline-audio-v1 & ege-vinyl-audio-cache-v1)
         if (!offlineBlob && trackId && typeof caches !== 'undefined') {
-          try {
-            const cache = await caches.open('ege-vinyl-audio-cache-v1');
-            const cachedRes = await cache.match(`/offline-audio/${trackId}`);
-            if (cachedRes) {
-              offlineBlob = await cachedRes.blob();
-            }
-
-            if (!offlineThumbnail) {
-              const cachedImg = await cache.match(`/offline-image/${trackId}`);
-              if (cachedImg) {
-                offlineThumbnail = await cachedImg.text();
+          for (const cacheName of ['offline-audio-v1', 'ege-vinyl-audio-cache-v1']) {
+            try {
+              const cache = await caches.open(cacheName);
+              const cachedRes = await cache.match(`/offline-audio/${trackId}`);
+              if (cachedRes) {
+                offlineBlob = await cachedRes.blob();
               }
+
+              if (!offlineThumbnail) {
+                const cachedImg = await cache.match(`/offline-image/${trackId}`);
+                if (cachedImg) {
+                  offlineThumbnail = await cachedImg.text();
+                }
+              }
+              if (offlineBlob) break;
+            } catch (e) {
+              console.warn(`[AudioEngine] Cache API (${cacheName}) lookup failed:`, e);
             }
-          } catch (e) {
-            console.warn('[AudioEngine] Cache API lookup failed:', e);
           }
         }
 

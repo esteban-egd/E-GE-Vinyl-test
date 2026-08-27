@@ -35,6 +35,7 @@ import {
 import { formatListeners, formatListenersShort, formatPlayCount, parseListenersCount } from '../utils/formatListeners';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import TrackImage from '../components/common/TrackImage';
+import DownloadBadge from '../components/common/DownloadBadge';
 import { SearchSkeleton } from '../components/search/SearchSkeleton';
 import PlaylistDetailModal from '../components/common/PlaylistDetailModal';
 
@@ -1022,12 +1023,15 @@ export default function SearchPage() {
                             </div>
 
                             <div className="flex-1 min-w-0">
-                              <p 
-                                className="text-sm font-semibold truncate group-hover:text-white"
-                                style={{ color: isThisActive ? (currentTheme?.primary || '#1ED760') : '#f1f5f9', fontWeight: isThisActive ? 'bold' : '600' }}
-                              >
-                                {track.cleanTitle || track.title}
-                              </p>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <p 
+                                  className="text-sm font-semibold truncate group-hover:text-white"
+                                  style={{ color: isThisActive ? (currentTheme?.primary || '#1ED760') : '#f1f5f9', fontWeight: isThisActive ? 'bold' : '600' }}
+                                >
+                                  {track.cleanTitle || track.title}
+                                </p>
+                                <DownloadBadge videoId={track.videoId || track.id} />
+                              </div>
                               <p 
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1120,11 +1124,14 @@ export default function SearchPage() {
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <p className={`text-xs md:text-sm font-bold truncate tracking-tight ${
-                            isCurrentActive ? 'text-[#1DB954]' : 'text-white group-hover:text-[#1DB954]'
-                          }`}>
-                            {track.cleanTitle || track.title}
-                          </p>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <p className={`text-xs md:text-sm font-bold truncate tracking-tight ${
+                              isCurrentActive ? 'text-[#1DB954]' : 'text-white group-hover:text-[#1DB954]'
+                            }`}>
+                              {track.cleanTitle || track.title}
+                            </p>
+                            <DownloadBadge videoId={track.videoId || track.id} />
+                          </div>
                           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-gray-400 font-medium truncate">
                             <span 
                               onClick={(e) => {

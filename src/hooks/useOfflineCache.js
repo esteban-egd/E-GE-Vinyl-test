@@ -25,10 +25,14 @@ export function useOfflineCache() {
 
   const getCacheSize = useCallback(async () => {
     try {
-      const cache = await db.audioCache.toArray();
       let totalBytes = 0;
+      const cache = await db.audioCache.toArray();
       cache.forEach(item => {
         if (item.blob) totalBytes += item.blob.size;
+      });
+      const offline = await db.offlineTracks.toArray();
+      offline.forEach(item => {
+        if (item.audioBlob) totalBytes += item.audioBlob.size;
       });
       return (totalBytes / (1024 * 1024)).toFixed(2);
     } catch {
@@ -108,6 +112,15 @@ export function useOfflineCache() {
   const clearCache = useCallback(async () => {
     try {
       await db.audioCache.clear();
+      await db.offlineTracks.clear();
+      if (typeof caches !== 'undefined') {
+        await caches.delete('offline-audio-v1');
+        await caches.delete('ege-vinyl-audio-cache-v1');
+      }
+      localStorage.removeItem('ege-offline-tracks-index');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('offline-tracks-updated', { detail: { action: 'clear' } }));
+      }
     } catch (err) {
       console.error('Clear cache error:', err);
       setError('Failed to clear cache');

@@ -407,9 +407,15 @@ async function startServer() {
       let audioStreamUrl: string | null = null;
       let contentType = "audio/mpeg";
 
-      // 1. Try finding audio via Deezer first if title & artist are provided
-      if (title) {
-        const queryTerm = `${title} ${artist}`.trim();
+      const cleanTitle = title
+        .replace(/\b(feat|ft|featuring|remastered|version|live|clip|official)\b.*/i, '')
+        .replace(/[\(\[\{].*?[\)\]\}]/g, '')
+        .trim();
+      const cleanArtist = artist.split(/[,&/xX]/)[0].trim();
+      const queryTerm = `${cleanTitle} ${cleanArtist}`.trim() || `${title} ${artist}`.trim();
+
+      // 1. Deezer preview lookup
+      if (queryTerm) {
         try {
           const dzRes = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(queryTerm)}&limit=1`, {
             headers: { "User-Agent": "Mozilla/5.0" },
@@ -427,13 +433,35 @@ async function startServer() {
         }
       }
 
-      // 2. If no Deezer match and video ID is present, try Invidious & Cobalt
+      // 2. iTunes preview lookup fallback
+      if (!audioStreamUrl && queryTerm) {
+        try {
+          const itRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(queryTerm)}&entity=song&limit=1`, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            signal: AbortSignal.timeout(3500)
+          });
+          if (itRes.ok) {
+            const itData = await itRes.json();
+            if (itData?.results?.[0]?.previewUrl) {
+              audioStreamUrl = itData.results[0].previewUrl;
+              contentType = "audio/mp4";
+            }
+          }
+        } catch (e: any) {
+          console.warn("[Server] iTunes preview lookup failed:", e.message);
+        }
+      }
+
+      // 3. Invidious video audio streams fallback
       if (!audioStreamUrl && id) {
         const invidiousInstances = [
-          "https://inv.nadeko.net",
           "https://invidious.nerdvpn.de",
-          "https://invidious.no-valis.fr",
-          "https://invidious.jing.rocks"
+          "https://inv.tux.pizza",
+          "https://invidious.jing.rocks",
+          "https://invidious.privacyredirect.com",
+          "https://invidious.drgns.space",
+          "https://yt.artemislena.eu",
+          "https://invidious.projectsegfau.lt"
         ];
 
         for (const inst of invidiousInstances) {
@@ -454,11 +482,38 @@ async function startServer() {
         }
       }
 
+      // 4. Cobalt API fallback
+      if (!audioStreamUrl && id) {
+        try {
+          const cobaltRes = await fetch("https://api.cobalt.tools/api/json", {
+            method: "POST",
+            headers: {
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              url: `https://www.youtube.com/watch?v=${id}`,
+              isAudioOnly: true,
+              audioFormat: "mp3",
+              audioQuality: "8"
+            }),
+            signal: AbortSignal.timeout(4000)
+          });
+          if (cobaltRes.ok) {
+            const cobData = await cobaltRes.json();
+            if (cobData.url) {
+              audioStreamUrl = cobData.url;
+              contentType = "audio/mpeg";
+            }
+          }
+        } catch (_) {}
+      }
+
       if (!audioStreamUrl) {
         return res.status(404).json({ error: "No audio stream available for offline caching" });
       }
 
-      // Fetch the binary audio and pipe with correct headers
+      // Fetch binary audio stream
       const audioFetch = await fetch(audioStreamUrl, {
         headers: { "User-Agent": "Mozilla/5.0" }
       });

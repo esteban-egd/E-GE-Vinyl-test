@@ -1,5 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
-import { isTrackDownloaded, downloadTrack as serviceDownloadTrack, removeTrack as serviceRemoveTrack, getDownloadedTracks } from '../services/offlineStorageService';
+import { 
+  downloadTrack as serviceDownloadTrack, 
+  downloadAllTracks as serviceDownloadAllTracks,
+  removeTrack as serviceRemoveTrack, 
+  getDownloadedTracks 
+} from '../services/downloadService';
 import { toast } from 'react-hot-toast';
 
 const OfflineContext = createContext();
@@ -8,22 +13,40 @@ export function OfflineProvider({ children }) {
   const [downloadedTrackIds, setDownloadedTrackIds] = useState(new Set());
   const [downloadingIds, setDownloadingIds] = useState(new Set());
   const [isSyncEnabled, setIsSyncEnabled] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(null); // { current: 0, total: 0, currentTitle: '' }
+  const [downloadProgress, setDownloadProgress] = useState(null); // { current: 0, total: 0, percentage: 0, currentTitle: '', isSyncing: boolean }
+
+  const refreshDownloadedList = useCallback(async () => {
+    try {
+      const tracks = await getDownloadedTracks();
+      setDownloadedTrackIds(new Set(tracks.map(t => t.videoId || t.id)));
+    } catch (err) {
+      console.error('Failed to load offline tracks', err);
+    }
+  }, []);
 
   useEffect(() => {
-    // Load initial state
-    const loadState = async () => {
-      try {
-        const tracks = await getDownloadedTracks();
-        setDownloadedTrackIds(new Set(tracks.map(t => t.videoId)));
-        const syncPref = localStorage.getItem('ege-vinyl-sync-enabled') === 'true';
-        setIsSyncEnabled(syncPref);
-      } catch (err) {
-        console.error('Failed to load offline tracks', err);
+    refreshDownloadedList();
+    const syncPref = localStorage.getItem('ege-vinyl-sync-enabled') === 'true';
+    setIsSyncEnabled(syncPref);
+
+    // Event listener for cross-tab or cross-component sync
+    const handleStorageUpdate = (e) => {
+      if (e.detail?.action === 'add' && e.detail?.videoId) {
+        setDownloadedTrackIds(prev => new Set(prev).add(e.detail.videoId));
+      } else if (e.detail?.action === 'remove' && e.detail?.videoId) {
+        setDownloadedTrackIds(prev => {
+          const next = new Set(prev);
+          next.delete(e.detail.videoId);
+          return next;
+        });
+      } else {
+        refreshDownloadedList();
       }
     };
-    loadState();
-  }, []);
+
+    window.addEventListener('offline-tracks-updated', handleStorageUpdate);
+    return () => window.removeEventListener('offline-tracks-updated', handleStorageUpdate);
+  }, [refreshDownloadedList]);
 
   const isDownloaded = useCallback((videoId) => {
     if (!videoId) return false;
@@ -35,7 +58,7 @@ export function OfflineProvider({ children }) {
     if (!videoId) return false;
 
     if (downloadedTrackIds.has(videoId)) {
-      toast.success('Morceau déjà téléchargé');
+      toast.success('Morceau déjà disponible hors-ligne');
       return true;
     }
 
@@ -77,31 +100,71 @@ export function OfflineProvider({ children }) {
     }
   }, []);
 
+  /**
+   * Batch download function: processes sequentially (for...of),
+   * updates the green icon immediately after each track finishes,
+   * displays real-time progress, and never crashes on track errors.
+   */
+  const downloadAllTracksHandler = useCallback(async (tracks) => {
+    if (!Array.isArray(tracks) || tracks.length === 0) {
+      toast('Aucun titre à télécharger');
+      return;
+    }
+
+    const toDownload = tracks.filter(t => !downloadedTrackIds.has(t.videoId || t.video_id || t.id));
+    if (toDownload.length === 0) {
+      toast.success('Tous les titres de cette liste sont déjà disponibles hors-ligne !', { icon: '✅' });
+      return;
+    }
+
+    toast(`Téléchargement de ${toDownload.length} titre(s) en cours...`, { icon: '⬇️' });
+
+    setDownloadProgress({
+      current: 0,
+      total: toDownload.length,
+      percentage: 0,
+      currentTitle: toDownload[0].title || 'Préparation...',
+      isSyncing: true
+    });
+
+    try {
+      await serviceDownloadAllTracks(
+        toDownload,
+        (progress) => {
+          setDownloadProgress({
+            current: progress.current,
+            total: progress.total,
+            percentage: progress.percentage,
+            currentTitle: progress.currentTitle,
+            isSyncing: true
+          });
+        },
+        (trackId) => {
+          // Immediately update state so green badges switch on per track
+          setDownloadedTrackIds(prev => new Set(prev).add(trackId));
+        }
+      );
+
+      toast.success(`Téléchargement terminé avec succès (${toDownload.length} titres stockés) !`, { icon: '🎉' });
+    } catch (err) {
+      console.error('[OfflineContext] Batch download error:', err);
+      toast.error('Une interruption est survenue durant le téléchargement');
+    } finally {
+      setTimeout(() => {
+        setDownloadProgress(null);
+      }, 2500);
+    }
+  }, [downloadedTrackIds]);
+
   const toggleSync = useCallback(async (likedTracks) => {
     const newState = !isSyncEnabled;
     setIsSyncEnabled(newState);
-    localStorage.setItem('ege-vinyl-sync-enabled', newState);
+    localStorage.setItem('ege-vinyl-sync-enabled', String(newState));
 
     if (newState && likedTracks && likedTracks.length > 0) {
-      const toDownload = likedTracks.filter(t => !downloadedTrackIds.has(t.videoId || t.video_id || t.id));
-      if (toDownload.length > 0) {
-        setDownloadProgress({ current: 0, total: toDownload.length, currentTitle: toDownload[0].title || '' });
-        
-        for (let i = 0; i < toDownload.length; i++) {
-          const track = toDownload[i];
-          const vId = track.videoId || track.video_id || track.id;
-          setDownloadProgress({ current: i, total: toDownload.length, currentTitle: track.title || '' });
-          const success = await serviceDownloadTrack(track);
-          if (success) {
-            setDownloadedTrackIds(prev => new Set(prev).add(vId));
-          }
-          setDownloadProgress({ current: i + 1, total: toDownload.length, currentTitle: track.title || '' });
-        }
-        
-        setTimeout(() => setDownloadProgress(null), 2500);
-      }
+      await downloadAllTracksHandler(likedTracks);
     }
-  }, [isSyncEnabled, downloadedTrackIds]);
+  }, [isSyncEnabled, downloadAllTracksHandler]);
 
   const handleTrackLiked = useCallback(async (track) => {
     if (isSyncEnabled) {
@@ -116,12 +179,13 @@ export function OfflineProvider({ children }) {
   }, [isSyncEnabled, downloadedTrackIds]);
 
   const syncState = useMemo(() => {
-    if (!downloadProgress) return { isSyncing: false, current: 0, total: 0, currentTitle: '' };
+    if (!downloadProgress) return { isSyncing: false, current: 0, total: 0, percentage: 0, currentTitle: '' };
     return {
       isSyncing: true,
       current: downloadProgress.current,
       total: downloadProgress.total,
-      currentTitle: downloadProgress.currentTitle || 'Téléchargement...'
+      percentage: downloadProgress.percentage || Math.round((downloadProgress.current / downloadProgress.total) * 100),
+      currentTitle: downloadProgress.currentTitle || 'Téléchargement en cours...'
     };
   }, [downloadProgress]);
 
@@ -131,13 +195,16 @@ export function OfflineProvider({ children }) {
       isDownloaded,
       isDownloading: downloadingIds,
       downloadTrack: downloadTrackHandler,
+      downloadAllTracks: downloadAllTracksHandler,
+      downloadBatch: downloadAllTracksHandler,
       removeTrack: removeTrackHandler,
       removeDownloadedTrack: removeTrackHandler,
       isSyncEnabled,
       toggleSync,
       downloadProgress,
       syncState,
-      handleTrackLiked
+      handleTrackLiked,
+      refreshDownloadedList
     }}>
       {children}
     </OfflineContext.Provider>

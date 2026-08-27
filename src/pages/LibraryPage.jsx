@@ -933,6 +933,7 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
   const { 
     downloadedTrackIds, 
     downloadTrack, 
+    downloadAllTracks,
     removeTrack: removeDownloadedTrack, 
     isDownloading, 
     toggleSync 
@@ -1146,17 +1147,33 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
             </button>
 
             {/* Download/Sync Button */}
-            <button
-              onClick={() => toggleSync(formattedTracks)}
-              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                isDownloaded 
-                  ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' 
-                  : 'bg-white/10 hover:bg-white/20 text-white'
-              }`}
-              title="Télécharger la sélection"
-            >
-              <Download size={18} />
-            </button>
+            {(() => {
+              const isAllDownloaded = formattedTracks.length > 0 && formattedTracks.every(t => downloadedTrackIds.has(t.videoId || t.id));
+              return (
+                <button
+                  onClick={() => {
+                    if (isAllDownloaded) {
+                      toast.success('Tous les titres de cette liste sont déjà stockés hors-ligne !', { icon: '✅' });
+                    } else {
+                      downloadAllTracks(formattedTracks);
+                    }
+                  }}
+                  disabled={formattedTracks.length === 0}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                    isAllDownloaded || isDownloaded 
+                      ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' 
+                      : 'bg-white/10 hover:bg-white/20 text-white'
+                  }`}
+                  title={isAllDownloaded || isDownloaded ? "Tous les titres sont enregistrés en local" : "Tout télécharger pour le mode hors-ligne"}
+                >
+                  {isAllDownloaded || isDownloaded ? (
+                    <Check size={18} strokeWidth={3} className="text-emerald-400" />
+                  ) : (
+                    <Download size={18} />
+                  )}
+                </button>
+              );
+            })()}
 
             {/* Share Button */}
             <button
