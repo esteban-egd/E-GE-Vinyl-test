@@ -62,6 +62,26 @@
     </script>
   </head>
   <body>
+    <audio id="global-player" playsinline webkit-playsinline preload="auto" style="display:none"></audio>
+    <script>
+      (function() {
+        var unlocked = false;
+        function unlock() {
+          if (unlocked) return;
+          var audio = document.getElementById('global-player');
+          if (audio) {
+            audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAA=';
+            audio.play().then(function() {
+              unlocked = true;
+              document.removeEventListener('touchstart', unlock);
+              document.removeEventListener('click', unlock);
+            }).catch(function() {});
+          }
+        }
+        document.addEventListener('touchstart', unlock, { passive: true, once: true });
+        document.addEventListener('click', unlock, { passive: true, once: true });
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

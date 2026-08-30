@@ -126,21 +126,12 @@ function AppContent() {
     : "pb-24 md:pb-6";
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-[var(--color-canvas)] text-[var(--color-charcoal)] font-sans flex-col pt-[env(safe-area-inset-top)]">
+    <div className="flex h-dvh w-full overflow-hidden bg-[var(--color-canvas)] text-[var(--color-charcoal)] font-sans flex-col">
       <MessageLogic />
       <ContextBanner />
       <OfflineNotice />
       <OfflineSyncBar />
       <div className="flex flex-1 w-full overflow-hidden relative">
-        {/* Lecteur Audio Direct Permanent */}
-        <audio
-          id="global-player"
-          playsInline
-          webkit-playsinline="true"
-          preload="auto"
-          className="hidden"
-        />
-
         {/* Moteur YouTube Iframe Player Unique et Permanent */}
         <YouTubeIframe />
 

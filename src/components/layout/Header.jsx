@@ -63,7 +63,7 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
 
   return (
     <header 
-      className="flex items-center justify-between px-4 sm:px-6 h-16 safe-top z-40 border-b border-white/5 transition-colors duration-300"
+      className="flex items-center justify-between px-4 sm:px-6 pt-[env(safe-area-inset-top)] pb-3 min-h-[4rem] z-40 border-b border-white/5 transition-colors duration-300"
       style={{ backgroundColor: currentTheme.bg }}
     >
       <div className="flex items-center gap-3">
