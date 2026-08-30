@@ -45,11 +45,16 @@ export const AuthProvider = ({ children }) => {
       } catch {}
     }
 
+    let lastUserId = null;
+
     // Check active sessions and sets the user
     supabase.auth.getSession().then(({ data: { session } }) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      if (currentUser) fetchProfile(currentUser.id);
+      if (currentUser) {
+        lastUserId = currentUser.id;
+        fetchProfile(currentUser.id);
+      }
       setLoading(false);
     }).catch(() => setLoading(false));
 
@@ -67,6 +72,15 @@ export const AuthProvider = ({ children }) => {
         setProfile(null);
       }
       setLoading(false);
+      
+      const currentUserId = currentUser?.id || null;
+      if (currentUserId !== lastUserId) {
+        lastUserId = currentUserId;
+        try {
+          window.dispatchEvent(new CustomEvent('lyra:auth_changed', { detail: { user: currentUser } }));
+          window.dispatchEvent(new CustomEvent('lyra:reset_player'));
+        } catch (_) {}
+      }
     });
 
     return () => subscription?.unsubscribe?.();
@@ -96,6 +110,10 @@ export const AuthProvider = ({ children }) => {
     }
     setUser(guest);
     setProfile(guestProfile);
+    try {
+      window.dispatchEvent(new CustomEvent('lyra:auth_changed', { detail: { user: guest } }));
+      window.dispatchEvent(new CustomEvent('lyra:reset_player'));
+    } catch (_) {}
   };
 
   const value = {
@@ -111,21 +129,64 @@ export const AuthProvider = ({ children }) => {
           if (res.data.user.id) {
             fetchProfile(res.data.user.id);
           }
+          try {
+            window.dispatchEvent(new CustomEvent('lyra:auth_changed', { detail: { user: res.data.user } }));
+            window.dispatchEvent(new CustomEvent('lyra:reset_player'));
+          } catch (_) {}
         }
         return res;
       } catch (err) {
         return { data: null, error: err };
       }
     },
-    signUp: async (email, password) => {
+    signUp: async (email, password, metadata = {}) => {
       try {
-        const res = await supabase.auth.signUp({ email, password });
-        if (!res.error && res.data?.user && res.data?.session) {
+        const fullName = metadata.displayName || metadata.full_name || metadata.username || email.split('@')[0];
+        const username = metadata.username ? metadata.username.replace('@', '') : email.split('@')[0];
+        const avatarUrl = metadata.avatar_url || '';
+
+        const res = await supabase.auth.signUp({ 
+          email, 
+          password,
+          options: {
+            data: {
+              full_name: fullName,
+              username: username,
+              avatar_url: avatarUrl
+            }
+          }
+        });
+
+        // Set initial optimistic profile immediately
+        const initialProfile = {
+          full_name: fullName,
+          username: username,
+          avatar_url: avatarUrl
+        };
+
+        if (!res.error && res.data?.user) {
           localStorage.removeItem('ege_guest_user');
           setUser(res.data.user);
+          setProfile(initialProfile);
+
           if (res.data.user.id) {
+            // Persist into Supabase profiles table directly
+            try {
+              await supabase.from('profiles').upsert({
+                id: res.data.user.id,
+                full_name: fullName,
+                username: username,
+                avatar_url: avatarUrl,
+                updated_at: new Date().toISOString()
+              });
+            } catch (_) {}
             fetchProfile(res.data.user.id);
           }
+
+          try {
+            window.dispatchEvent(new CustomEvent('lyra:auth_changed', { detail: { user: res.data.user } }));
+            window.dispatchEvent(new CustomEvent('lyra:reset_player'));
+          } catch (_) {}
         }
         return res;
       } catch (err) {
@@ -135,9 +196,16 @@ export const AuthProvider = ({ children }) => {
     signInAsGuest,
     signOut: async () => {
       localStorage.removeItem('ege_guest_user');
+      try {
+        window.dispatchEvent(new CustomEvent('lyra:reset_player'));
+      } catch (_) {}
       await supabase.auth.signOut();
       setUser(null);
       setProfile(null);
+      try {
+        window.dispatchEvent(new CustomEvent('lyra:auth_changed', { detail: { user: null } }));
+        window.dispatchEvent(new CustomEvent('lyra:reset_player'));
+      } catch (_) {}
     },
     updateProfile: async (updates) => {
       if (!user) throw new Error('No user logged in');

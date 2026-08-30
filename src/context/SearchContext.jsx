@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { searchUnified, searchOfflineDexie } from '../services/musicDataService';
-import { searchLyraTracks } from '../services/lyraSearch';
+import { searchOfflineDexie } from '../services/musicDataService';
+import { searchDeezerUnified } from '../services/searchService';
 import { classifyTrack, sortTracksByPriority } from '../utils/trackClassifier';
 import { supabase } from '../lib/supabaseClient';
 import db from '../lib/db';
@@ -45,6 +45,7 @@ export function SearchProvider({ children }) {
   const searchTimeoutRef = useRef(null);
   const activeSearchIdRef = useRef(0);
   const audioModeRef = useRef(audioMode);
+  const activeAbortControllerRef = useRef(null);
 
   useEffect(() => {
     audioModeRef.current = audioMode;
@@ -232,7 +233,7 @@ export function SearchProvider({ children }) {
       setError(null);
       try {
         const offlineResults = await searchOfflineDexie(clean, currentMode);
-        setResults(offlineResults);
+        setResults({ ...offlineResults, isOffline: true });
       } catch (offlineErr) {
         console.error('[SearchContext] Offline search error:', offlineErr);
         setError('Erreur lors de la recherche hors-ligne.');
@@ -242,52 +243,40 @@ export function SearchProvider({ children }) {
       return;
     }
 
-    // Si déjà en cache, affichage 0ms
+    // Si déjà en cache avec des résultats, affichage 0ms
     if (searchMemoryCache.has(cacheKey)) {
-      setResults(searchMemoryCache.get(cacheKey));
-      setIsSearching(false);
-      setError(null);
-      return;
+      const cached = searchMemoryCache.get(cacheKey);
+      if (cached && (cached.tracks?.length > 0 || cached.artists?.length > 0 || cached.albums?.length > 0)) {
+        setResults({ ...cached, isOffline: false });
+        setIsSearching(false);
+        setError(null);
+        return;
+      } else {
+        searchMemoryCache.delete(cacheKey);
+      }
     }
+
+    // Annuler la requête précédente en cours si l'utilisateur continue de taper
+    if (activeAbortControllerRef.current) {
+      activeAbortControllerRef.current.abort();
+      activeAbortControllerRef.current = null;
+    }
+
+    const controller = new AbortController();
+    activeAbortControllerRef.current = controller;
 
     const currentSearchId = ++activeSearchIdRef.current;
     setIsSearching(true);
     setError(null);
 
     try {
-      // Recherche parallèle multi-sources ultra-rapide
-      const [lyraTracks, unifiedData, offlineLocalData] = await Promise.allSettled([
-        searchLyraTracks(clean),
-        searchUnified(clean, currentMode),
-        searchOfflineDexie(clean, currentMode)
-      ]);
+      // 1. Appeler le service de recherche Deezer unifié ultra-rapide
+      const finalUnified = await searchDeezerUnified(clean, controller.signal);
 
-      // Si l'utilisateur a tapé une autre recherche entre-temps, ignorer les anciens résultats
-      if (activeSearchIdRef.current !== currentSearchId) {
+      // Si l'utilisateur a tapé une autre recherche entre-temps, ignorer
+      if (activeSearchIdRef.current !== currentSearchId || controller.signal.aborted) {
         return;
       }
-
-      const finalLyraTracks = lyraTracks.status === 'fulfilled' ? lyraTracks.value : [];
-      const finalUnified = unifiedData.status === 'fulfilled' ? unifiedData.value : { tracks: [], artists: [], albums: [] };
-      const finalOffline = offlineLocalData.status === 'fulfilled' ? offlineLocalData.value : { tracks: [], artists: [], albums: [] };
-
-      // Si le réseau n'a rien retourné (erreur réseau ou serveur injoignable), basculer sur les résultats locaux
-      const onlineTracksFound = (finalUnified.tracks && finalUnified.tracks.length > 0) || finalLyraTracks.length > 0;
-
-      if (!onlineTracksFound && finalOffline.tracks && finalOffline.tracks.length > 0) {
-        const sortedOffline = {
-          ...finalOffline,
-          tracks: sortTracksByPriority(finalOffline.tracks, currentMode)
-        };
-        setResults(sortedOffline);
-        searchMemoryCache.set(cacheKey, sortedOffline);
-        return;
-      }
-
-      // Fusion intelligente : privilégier les morceaux unifiés enrichis, triés et filtrés
-      const baseTracks = (finalUnified.tracks && finalUnified.tracks.length > 0)
-        ? finalUnified.tracks
-        : finalLyraTracks;
 
       // Décorer les morceaux avec le statut téléchargé en local si présent dans Dexie
       let downloadedSet = new Set();
@@ -298,7 +287,7 @@ export function SearchProvider({ children }) {
         }
       } catch (_) {}
 
-      const decoratedTracks = (baseTracks || []).map(t => {
+      const decoratedTracks = (finalUnified.tracks || []).map(t => {
         const id = t.videoId || t.id;
         const classified = classifyTrack(t) || t;
         return {
@@ -307,38 +296,48 @@ export function SearchProvider({ children }) {
         };
       });
 
-      // Tri strict par ordre de priorité selon le mode sélectionné
+      // Tri par ordre de priorité selon le mode sélectionné
       const prioritizedTracks = sortTracksByPriority(decoratedTracks, currentMode);
 
       const newResults = {
         tracks: prioritizedTracks,
         artists: finalUnified.artists || [],
         albums: finalUnified.albums || [],
+        bestMatch: finalUnified.bestMatch || null,
+        bestArtist: finalUnified.bestArtist || null,
+        bestArtistTracks: finalUnified.bestArtistTracks || [],
         isOffline: false
       };
 
-      searchMemoryCache.set(cacheKey, newResults);
+      if (prioritizedTracks.length > 0 || newResults.artists.length > 0 || newResults.albums.length > 0) {
+        searchMemoryCache.set(cacheKey, newResults);
+      }
       setResults(newResults);
 
       if (clean.length >= 2) {
         addRecentSearch(clean);
       }
     } catch (err) {
-      console.error('[SearchContext] Erreur recherche en ligne, bascule locale:', err);
-      // Fallback automatique vers Dexie
+      console.warn('[SearchContext] Erreur recherche en ligne:', err);
       try {
         const fallbackResults = await searchOfflineDexie(clean, currentMode);
         if (activeSearchIdRef.current === currentSearchId) {
-          setResults(fallbackResults);
+          setResults({
+            ...fallbackResults,
+            bestArtist: null,
+            bestArtistTracks: [],
+            isOffline: false
+          });
         }
       } catch (_) {
         if (activeSearchIdRef.current === currentSearchId) {
-          setError('Impossible de charger les résultats. Mode hors-ligne disponible.');
+          setError('Impossible de charger les résultats.');
         }
       }
     } finally {
       if (activeSearchIdRef.current === currentSearchId) {
         setIsSearching(false);
+        activeAbortControllerRef.current = null;
       }
     }
   }, [addRecentSearch]);
@@ -359,9 +358,14 @@ export function SearchProvider({ children }) {
     const currentMode = audioModeRef.current || 'studio';
     const cacheKey = `${newQuery.trim().toLowerCase()}_${currentMode}`;
     if (searchMemoryCache.has(cacheKey)) {
-      setResults(searchMemoryCache.get(cacheKey));
-      setIsSearching(false);
-      return;
+      const cached = searchMemoryCache.get(cacheKey);
+      if (cached && (cached.tracks?.length > 0 || cached.artists?.length > 0 || cached.albums?.length > 0)) {
+        setResults(cached);
+        setIsSearching(false);
+        return;
+      } else {
+        searchMemoryCache.delete(cacheKey);
+      }
     }
 
     setIsSearching(true);

@@ -213,8 +213,9 @@ export async function downloadTrack(track) {
 
     const title = track.title || '';
     const artist = track.artist || '';
+    const targetDuration = track.duration || 0;
 
-    const audioData = await fetchFullAudioBlob(title, artist, videoId);
+    const audioData = await fetchFullAudioBlob(title, artist, videoId, targetDuration);
     if (audioData) {
       audioBlob = audioData.blob;
       mimeType = audioData.mimeType;

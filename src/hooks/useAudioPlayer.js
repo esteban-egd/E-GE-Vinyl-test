@@ -130,6 +130,7 @@ export function useAudioPlayer() {
   const actionsRef = useRef({ resume: null, pause: null, next: null, prev: null, seek: null });
   const handleTrackEndedRef = useRef(null);
   const playRequestIdRef = useRef(0);
+  const fadeIntervalRef = useRef(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -280,10 +281,40 @@ export function useAudioPlayer() {
         el = document.createElement('audio');
         el.id = 'global-player';
         el.style.display = 'none';
-        el.preload = 'auto';
         el.crossOrigin = 'anonymous';
         document.body.appendChild(el);
       }
+      
+      el.preload = 'auto';
+      if ('preservesPitch' in el) {
+        el.preservesPitch = true;
+      }
+
+      if (!el.__webAudioProcessed) {
+        try {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) {
+            const ctx = new AudioContextClass();
+            const source = ctx.createMediaElementSource(el);
+            const compressor = ctx.createDynamicsCompressor();
+            
+            compressor.threshold.value = -24;
+            compressor.knee.value = 30;
+            compressor.ratio.value = 12;
+            compressor.attack.value = 0.003;
+            compressor.release.value = 0.25;
+
+            source.connect(compressor);
+            compressor.connect(ctx.destination);
+            
+            el.__webAudioProcessed = true;
+            window.__lyraMainAudioCtx = ctx;
+          }
+        } catch (err) {
+          console.warn('[AudioEngine] Web Audio API setup failed:', err);
+        }
+      }
+
       audioRef.current = el;
     }
 
@@ -306,6 +337,11 @@ export function useAudioPlayer() {
     const onTimeUpdate = () => {
       if (activeEngineRef.current === 'audio') {
         setCurrentTime(audio.currentTime);
+        try {
+          if (window.__lyraMainAudioCtx && window.__lyraMainAudioCtx.state === 'suspended') {
+            window.__lyraMainAudioCtx.resume();
+          }
+        } catch (_) {}
       }
     };
     const onDurationChange = () => {
@@ -412,6 +448,11 @@ export function useAudioPlayer() {
         const dur = iframePlayerRef.current.getDuration();
         if (dur > 0) setDuration(dur);
       }
+      try {
+        if (window.vinylAudioContext && window.vinylAudioContext.state === 'suspended') {
+          window.vinylAudioContext.resume();
+        }
+      } catch (_) {}
     } else if (state === 2) {
       setIsPlaying(false);
     } else if (state === 3) {
@@ -471,16 +512,132 @@ export function useAudioPlayer() {
 
   const pause = useCallback(() => {
     setIsPlaying(false);
-    if (activeEngineRef.current === 'iframe' && iframePlayerRef.current?.pauseVideo) {
-      try { iframePlayerRef.current.pauseVideo(); } catch {}
-    } else if (activeEngineRef.current === 'audio' && audioRef.current) {
-      audioRef.current.pause();
+    
+    if (fadeIntervalRef.current) {
+      clearInterval(fadeIntervalRef.current);
+      fadeIntervalRef.current = null;
+    }
+    
+    let currentVol = volume;
+    const fadeSteps = 10;
+    const fadeStepTime = 50; // 500ms total
+    const stepAmount = volume / fadeSteps;
+    
+    fadeIntervalRef.current = setInterval(() => {
+      currentVol -= stepAmount;
+      if (currentVol <= 0) {
+        clearInterval(fadeIntervalRef.current);
+        fadeIntervalRef.current = null;
+        currentVol = 0;
+        
+        if (activeEngineRef.current === 'iframe' && iframePlayerRef.current?.pauseVideo) {
+          try { iframePlayerRef.current.pauseVideo(); } catch {}
+        } else if (activeEngineRef.current === 'audio' && audioRef.current) {
+          audioRef.current.pause();
+        }
+      }
+      
+      if (iframePlayerRef.current?.setVolume) {
+        try { iframePlayerRef.current.setVolume(Math.round(currentVol * 100)); } catch {}
+      }
+      if (audioRef.current) {
+        audioRef.current.volume = Math.max(0, currentVol);
+      }
+    }, fadeStepTime);
+  }, [volume]);
+
+  const resetPlayer = useCallback(() => {
+    // 1. Invalidate any in-flight play requests / promises
+    playRequestIdRef.current++;
+    pendingTrackRef.current = null;
+    prebufferedTrackIdRef.current = null;
+
+    // 2. Stop HTML5 audio elements and clear sources
+    if (audioRef.current) {
+      try {
+        audioRef.current.pause();
+        audioRef.current.removeAttribute('src');
+        audioRef.current.src = '';
+        audioRef.current.load();
+        audioRef.current.currentTime = 0;
+      } catch (_) {}
+    }
+
+    if (prebufferAudioRef.current) {
+      try {
+        prebufferAudioRef.current.pause();
+        prebufferAudioRef.current.removeAttribute('src');
+        prebufferAudioRef.current.src = '';
+        prebufferAudioRef.current.load();
+      } catch (_) {}
+    }
+
+    // 3. Stop YouTube iframe player
+    const currentPlayer = iframePlayerRef.current;
+    if (currentPlayer) {
+      try {
+        if (typeof currentPlayer.stopVideo === 'function') {
+          currentPlayer.stopVideo();
+        } else if (typeof currentPlayer.pauseVideo === 'function') {
+          currentPlayer.pauseVideo();
+        }
+      } catch (_) {}
+    }
+
+    // 4. Stop vinyl noise generator
+    stopVinylNoise();
+
+    // 5. Reset player engine & state
+    activeEngineRef.current = 'none';
+    setCurrentTrack(null);
+    setIsPlaying(false);
+    setIsLoading(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setQueue([]);
+    setQueueIndex(-1);
+    setError(null);
+
+    // 6. Clear MediaSession metadata
+    if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = null;
+        navigator.mediaSession.playbackState = 'none';
+      } catch (_) {}
     }
   }, []);
+
+  // Listen for account switch / logout events
+  useEffect(() => {
+    const handleResetEvent = () => {
+      console.log('[AudioEngine] Resetting audio player on account change/logout');
+      resetPlayer();
+    };
+    window.addEventListener('lyra:auth_changed', handleResetEvent);
+    window.addEventListener('lyra:reset_player', handleResetEvent);
+    return () => {
+      window.removeEventListener('lyra:auth_changed', handleResetEvent);
+      window.removeEventListener('lyra:reset_player', handleResetEvent);
+    };
+  }, [resetPlayer]);
 
   const resume = useCallback(() => {
     if (!currentTrack) return;
     setIsPlaying(true);
+    
+    if (fadeIntervalRef.current) {
+      clearInterval(fadeIntervalRef.current);
+      fadeIntervalRef.current = null;
+    }
+    
+    let currentVol = 0;
+    if (iframePlayerRef.current?.setVolume) {
+      try { iframePlayerRef.current.setVolume(0); } catch {}
+    }
+    if (audioRef.current) {
+      audioRef.current.volume = 0;
+    }
+    
     if (activeEngineRef.current === 'iframe' && iframePlayerRef.current) {
       try {
         if (typeof iframePlayerRef.current.unMute === 'function') {
@@ -493,7 +650,26 @@ export function useAudioPlayer() {
     } else if (activeEngineRef.current === 'audio' && audioRef.current) {
       audioRef.current.play().catch(() => {});
     }
-  }, [currentTrack]);
+    
+    const fadeSteps = 10;
+    const fadeStepTime = 50; // 500ms total
+    const stepAmount = volume / fadeSteps;
+    
+    fadeIntervalRef.current = setInterval(() => {
+      currentVol += stepAmount;
+      if (currentVol >= volume) {
+        clearInterval(fadeIntervalRef.current);
+        fadeIntervalRef.current = null;
+        currentVol = volume;
+      }
+      if (iframePlayerRef.current?.setVolume) {
+        try { iframePlayerRef.current.setVolume(Math.round(currentVol * 100)); } catch {}
+      }
+      if (audioRef.current) {
+        audioRef.current.volume = Math.min(1, currentVol);
+      }
+    }, fadeStepTime);
+  }, [currentTrack, volume]);
 
   const seek = useCallback((seconds) => {
     const time = Math.max(0, Math.min(seconds, duration || 99999));
@@ -532,7 +708,10 @@ export function useAudioPlayer() {
 
     const trackMeta = {
       ...rawTrack,
-      id: validYtId || rawTrack.id,
+      id: rawTrack.id || (validYtId ? validYtId : rawTrack.videoId),
+      deezerId: rawTrack.deezerId || rawTrack.id,
+      albumId: rawTrack.albumId || (typeof rawTrack.album === 'object' ? rawTrack.album?.id : undefined),
+      album: rawTrack.album || (rawTrack.albumObj ? rawTrack.albumObj.title : undefined),
       videoId: validYtId || rawTrack.videoId || rawTrack.id,
       thumbnail: getHdArtwork(rawTrack.thumbnail, validYtId || rawTrack.id)
     };
@@ -725,14 +904,68 @@ export function useAudioPlayer() {
           }
 
           if (searchResults && searchResults.length > 0) {
-            let bestTrack = searchResults[0];
-            let maxScore = -99999;
+            const getDurationSec = (itm) => {
+              if (typeof itm.duration === 'number') return itm.duration;
+              if (typeof itm.lengthSeconds === 'number') return itm.lengthSeconds;
+              if (typeof itm.lengthSeconds === 'string') {
+                const parsed = parseInt(itm.lengthSeconds, 10);
+                if (!isNaN(parsed)) return parsed;
+              }
+              if (typeof itm.duration === 'string') {
+                const parts = itm.duration.split(':').map(Number);
+                if (parts.length === 2) return parts[0] * 60 + parts[1];
+                if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+                const parsed = parseInt(itm.duration, 10);
+                if (!isNaN(parsed)) return parsed;
+              }
+              return 0;
+            };
 
+            let bestTrack = null;
+            let highestScore = -99999;
+            const targetDuration = trackMeta.duration || 0;
+
+            // 1. Chercher des morceaux avec une tolérance stricte de +/- 3s
             for (const item of searchResults) {
+              const itemDuration = getDurationSec(item);
               const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
-              if (score > maxScore) {
-                maxScore = score;
-                bestTrack = item;
+              const diff = targetDuration > 0 && itemDuration > 0 ? Math.abs(itemDuration - targetDuration) : 9999;
+
+              if (targetDuration > 0 && itemDuration > 0 && diff <= 3) {
+                const augmentedScore = score + 10000 - diff * 1000;
+                if (augmentedScore > highestScore) {
+                  highestScore = augmentedScore;
+                  bestTrack = item;
+                }
+              }
+            }
+
+            // 2. Repli à +/- 10s si aucun morceau de +/- 3s trouvé
+            if (!bestTrack) {
+              for (const item of searchResults) {
+                const itemDuration = getDurationSec(item);
+                const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
+                const diff = targetDuration > 0 && itemDuration > 0 ? Math.abs(itemDuration - targetDuration) : 9999;
+
+                if (targetDuration > 0 && itemDuration > 0 && diff <= 10) {
+                  const augmentedScore = score + 5000 - diff * 200;
+                  if (augmentedScore > highestScore) {
+                    highestScore = augmentedScore;
+                    bestTrack = item;
+                  }
+                }
+              }
+            }
+
+            // 3. Repli général par score original
+            if (!bestTrack) {
+              bestTrack = searchResults[0];
+              for (const item of searchResults) {
+                const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
+                if (score > highestScore) {
+                  highestScore = score;
+                  bestTrack = item;
+                }
               }
             }
 
@@ -982,11 +1215,73 @@ export function useAudioPlayer() {
       searchLyraMusic(q).then((results) => {
         if (!isSubscribed) return;
         if (results && results.length > 0) {
-          const found = extractYouTubeId(results[0].videoId || results[0].id);
+          const getDurationSec = (itm) => {
+            if (typeof itm.duration === 'number') return itm.duration;
+            if (typeof itm.lengthSeconds === 'number') return itm.lengthSeconds;
+            if (typeof itm.lengthSeconds === 'string') {
+              const parsed = parseInt(itm.lengthSeconds, 10);
+              if (!isNaN(parsed)) return parsed;
+            }
+            if (typeof itm.duration === 'string') {
+              const parts = itm.duration.split(':').map(Number);
+              if (parts.length === 2) return parts[0] * 60 + parts[1];
+              if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+              const parsed = parseInt(itm.duration, 10);
+              if (!isNaN(parsed)) return parsed;
+            }
+            return 0;
+          };
+
+          let bestTrack = null;
+          let highestScore = -99999;
+          const targetDuration = nextTrack.duration || 0;
+
+          for (const item of results) {
+            const itemDuration = getDurationSec(item);
+            const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
+            const diff = targetDuration > 0 && itemDuration > 0 ? Math.abs(itemDuration - targetDuration) : 9999;
+
+            if (targetDuration > 0 && itemDuration > 0 && diff <= 3) {
+              const augmentedScore = score + 10000 - diff * 1000;
+              if (augmentedScore > highestScore) {
+                highestScore = augmentedScore;
+                bestTrack = item;
+              }
+            }
+          }
+
+          if (!bestTrack) {
+            for (const item of results) {
+              const itemDuration = getDurationSec(item);
+              const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
+              const diff = targetDuration > 0 && itemDuration > 0 ? Math.abs(itemDuration - targetDuration) : 9999;
+
+              if (targetDuration > 0 && itemDuration > 0 && diff <= 10) {
+                const augmentedScore = score + 5000 - diff * 200;
+                if (augmentedScore > highestScore) {
+                  highestScore = augmentedScore;
+                  bestTrack = item;
+                }
+              }
+            }
+          }
+
+          if (!bestTrack) {
+            bestTrack = results[0];
+            for (const item of results) {
+              const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
+              if (score > highestScore) {
+                highestScore = score;
+                bestTrack = item;
+              }
+            }
+          }
+
+          const found = extractYouTubeId(bestTrack.videoId || bestTrack.id);
           if (found && found.length === 11) {
             nextTrack.videoId = found;
             nextTrack.id = found;
-            console.log('[GaplessAudio] Identifiant flux pré-résolu pour le morceau suivant:', nextTrack.title, found);
+            console.log('[GaplessAudio] Identifiant flux pré-résolu pour le morceau suivant (avec filtrage par durée):', nextTrack.title, found);
           }
         }
       }).catch(() => {});
@@ -1019,12 +1314,18 @@ export function useAudioPlayer() {
 
   const setQueueAndPlay = useCallback((tracks, startIndex = 0) => {
     const formattedTracks = tracks.map(t => {
-      const vId = extractYouTubeId(t.videoId || t.id || '');
+      let vId = extractYouTubeId(t.videoId || t.ytVideoId || t.id || '');
+      if (!/^[a-zA-Z0-9_-]{11}$/.test(vId)) {
+        vId = '';
+      }
       return {
         ...t,
-        id: vId || t.id,
-        videoId: vId,
-        thumbnail: getHdArtwork(t.thumbnail, vId)
+        id: t.id || (vId ? vId : t.videoId),
+        deezerId: t.deezerId || t.id,
+        albumId: t.albumId || (typeof t.album === 'object' ? t.album?.id : undefined),
+        album: t.album || (t.albumObj ? t.albumObj.title : undefined),
+        videoId: vId || t.videoId || t.id,
+        thumbnail: getHdArtwork(t.thumbnail, vId || t.id)
       };
     });
     setQueue(formattedTracks);
@@ -1042,22 +1343,28 @@ export function useAudioPlayer() {
   const isCurrentTrack = useCallback((track) => {
     if (!currentTrack || !track) return false;
     
-    if (track.videoId && currentTrack.videoId && track.videoId === currentTrack.videoId) return true;
-    if (track.id && currentTrack.id && track.id === currentTrack.id) return true;
-    if (track.id && currentTrack.videoId && track.id === currentTrack.videoId) return true;
-    if (track.videoId && currentTrack.id && track.videoId === currentTrack.id) return true;
+    // Strict comparison by unique track ID / Deezer ID / YouTube videoId
+    const cId = currentTrack.id != null ? String(currentTrack.id) : null;
+    const tId = track.id != null ? String(track.id) : null;
+    const cDzId = currentTrack.deezerId != null ? String(currentTrack.deezerId) : null;
+    const tDzId = track.deezerId != null ? String(track.deezerId) : null;
+    const cVid = currentTrack.videoId ? String(currentTrack.videoId) : null;
+    const tVid = track.videoId ? String(track.videoId) : null;
 
-    if (track.title && currentTrack.title) {
-      const t1 = track.title.toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').trim();
-      const t2 = currentTrack.title.toLowerCase().replace(/[\(\[\{].*?[\)\]\}]/g, '').trim();
-      if (t1 && t1 === t2) {
-        const a1 = getMainArtistName(track.artist || '').toLowerCase();
-        const a2 = getMainArtistName(currentTrack.artist || '').toLowerCase();
-        if (!a1 || !a2 || a1 === a2 || a1.includes(a2) || a2.includes(a1)) {
-          return true;
-        }
-      }
-    }
+    // Direct match on primary unique IDs
+    if (tId && cId && tId === cId) return true;
+    if (tDzId && cDzId && tDzId === cDzId) return true;
+    if (tVid && cVid && tVid === cVid) return true;
+
+    // Cross-check id with videoId / deezerId (e.g., '123' vs 'dz_123')
+    if (tId && cVid && tId === cVid) return true;
+    if (tVid && cId && tVid === cId) return true;
+    if (tId && cDzId && (tId === cDzId || tId === `dz_${cDzId}`)) return true;
+    if (cId && tDzId && (cId === tDzId || cId === `dz_${tDzId}`)) return true;
+    if (tVid && cDzId && (tVid === cDzId || tVid === `dz_${cDzId}`)) return true;
+    if (cVid && tDzId && (cVid === tDzId || cVid === `dz_${tDzId}`)) return true;
+
+    // STRICT: Do NOT check by title or artist alone (to prevent false matches across remixes, live, acoustic versions)
     return false;
   }, [currentTrack]);
 
@@ -1106,6 +1413,9 @@ export function useAudioPlayer() {
     play,
     pause,
     resume,
+    resetPlayer,
+    reset: resetPlayer,
+    stopAndReset: resetPlayer,
     seekTo: seek,
     seek,
     currentTime,

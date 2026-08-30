@@ -242,8 +242,68 @@ export const searchYouTubeMusic = searchLyraMusic;
  * 3. Cobalt API Direct
  * 4. Piped API instances (flux m4a / webm complets)
  */
-export async function getLyraAudioStream(videoId, title, artist) {
-  if (!videoId) return null;
+export async function getLyraAudioStream(videoId, title, artist, targetDuration = 0) {
+  let resolvedYtId = extractYouTubeId(videoId);
+
+  // Si videoId n'est pas un ID YouTube de 11 caractères, rechercher à la demande avec filtrage strict par durée (+/- 3s max)
+  if (!resolvedYtId || resolvedYtId.length !== 11) {
+    if (title || artist) {
+      try {
+        const query = `${title || ''} ${artist || ''}`.trim();
+        const searchResults = await searchLyraMusic(query);
+        if (searchResults && searchResults.length > 0) {
+          let best = null;
+          let bestDiff = 999;
+
+          for (const cand of searchResults) {
+            const candDur = typeof cand.duration === 'number' ? cand.duration : parseDurationToSeconds(cand.duration);
+            const diff = targetDuration > 0 && candDur > 0 ? Math.abs(candDur - targetDuration) : 0;
+            
+            // Priorité absolue : candidats dans la tolérance +/- 3s max
+            if (targetDuration > 0 && candDur > 0 && diff <= 3) {
+              if (diff < bestDiff) {
+                bestDiff = diff;
+                best = cand;
+              }
+            }
+          }
+
+          // Fallback à +/- 6s si rien trouvé à +/- 3s
+          if (!best && targetDuration > 0) {
+            for (const cand of searchResults) {
+              const candDur = typeof cand.duration === 'number' ? cand.duration : parseDurationToSeconds(cand.duration);
+              const diff = Math.abs(candDur - targetDuration);
+              if (candDur > 0 && diff <= 6) {
+                if (diff < bestDiff) {
+                  bestDiff = diff;
+                  best = cand;
+                }
+              }
+            }
+          }
+
+          if (!best) {
+            best = searchResults[0];
+          }
+
+          const foundId = extractYouTubeId(best.videoId || best.id);
+          if (foundId && foundId.length === 11) {
+            resolvedYtId = foundId;
+          }
+        }
+      } catch (err) {
+        console.warn('[LyraAudio] On-demand YouTube resolution failed:', err);
+      }
+    }
+  }
+
+  if (!resolvedYtId) {
+    if (videoId && /^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
+      resolvedYtId = videoId;
+    } else {
+      return null;
+    }
+  }
 
   // 1. First, try several Invidious instances to fetch the audio stream direct URL
   const instances = [
@@ -258,7 +318,7 @@ export async function getLyraAudioStream(videoId, title, artist) {
 
   for (const inst of instances) {
     try {
-      const res = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+      const res = await fetch(`${inst}/api/v1/videos/${resolvedYtId}`, {
         signal: AbortSignal.timeout(4000)
       });
       if (res.ok) {
@@ -281,7 +341,7 @@ export async function getLyraAudioStream(videoId, title, artist) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        url: `https://www.youtube.com/watch?v=${videoId}`,
+        url: `https://www.youtube.com/watch?v=${resolvedYtId}`,
         isAudioOnly: true,
         audioFormat: 'mp3',
         audioQuality: '8' // 320kbps
@@ -296,7 +356,7 @@ export async function getLyraAudioStream(videoId, title, artist) {
 
   // 3. Fallback to Piped API
   try {
-    const res = await fetch(`https://pipedapi.kavin.rocks/streams/${videoId}`, {
+    const res = await fetch(`https://pipedapi.kavin.rocks/streams/${resolvedYtId}`, {
       signal: AbortSignal.timeout(4000)
     });
     if (res.ok) {
@@ -307,5 +367,5 @@ export async function getLyraAudioStream(videoId, title, artist) {
   } catch (_) {}
 
   // 4. Default to standard public search stream format endpoint or fallback to Vercel api stream endpoint
-  return `/api/stream?id=${videoId}`;
+  return `/api/stream?id=${resolvedYtId}`;
 }

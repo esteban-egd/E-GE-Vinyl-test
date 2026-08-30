@@ -1,1 +1,0 @@
-sed -i 's/label="Albums" /label="Albums" \n              count={results.albums?.length || 0}\n            \/>\n            <FilterChip \n              active={activeFilter === '\''vinyl'\''} \n              onClick={() => setActiveFilter('\''vinyl'\'')} \n              label="Style Vinyle" \n              count={0} \n            \/>/' src/pages/SearchPage.jsx

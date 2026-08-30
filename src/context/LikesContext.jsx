@@ -85,6 +85,13 @@ export function LikesProvider({ children }) {
 
   useEffect(() => {
     fetchLikes();
+    const handleAuth = () => {
+      fetchLikes();
+    };
+    window.addEventListener('lyra:auth_changed', handleAuth);
+    return () => {
+      window.removeEventListener('lyra:auth_changed', handleAuth);
+    };
   }, [fetchLikes]);
 
   const isLiked = useCallback((trackOrId) => {

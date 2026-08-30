@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useSearch } from '../context/SearchContext';
 import { useAudio } from '../context/AudioContext';
 import { useTheme } from '../context/ThemeContext';
+import { motion } from 'motion/react';
 import { 
   Search, 
   X, 
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useLikes } from '../hooks/useLikes';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 import { 
   FEATURED_ARTISTS, 
   SPOTIFY_TOP_50_GLOBAL, 
@@ -30,7 +32,10 @@ import {
   normalizeArtistKey, 
   isArtistMatch, 
   getMainArtistName,
-  isJunkArtist
+  isJunkArtist,
+  searchUnified,
+  areArtistsSame,
+  mergeArtistData
 } from '../services/musicDataService';
 import { formatListeners, formatListenersShort, formatPlayCount, parseListenersCount } from '../utils/formatListeners';
 import ArtistAvatar from '../components/common/ArtistAvatar';
@@ -38,6 +43,17 @@ import TrackImage from '../components/common/TrackImage';
 import DownloadBadge from '../components/common/DownloadBadge';
 import { SearchSkeleton } from '../components/search/SearchSkeleton';
 import PlaylistDetailModal from '../components/common/PlaylistDetailModal';
+
+const GENRES = [
+  { id: 'pop', name: 'Pop Hits', color: 'from-[#ec4899] to-[#be185d]', query: 'Pop', icon: Sparkles },
+  { id: 'hiphop', name: 'Hip-Hop', color: 'from-[#f97316] to-[#c2410c]', query: 'Hip Hop', icon: Mic2 },
+  { id: 'rock', name: 'Rock Anthems', color: 'from-[#ef4444] to-[#b91c1c]', query: 'Rock', icon: Flame },
+  { id: 'electro', name: 'Électro & Dance', color: 'from-[#8b5cf6] to-[#6d28d9]', query: 'Electro', icon: Disc },
+  { id: 'rap', name: 'Rap Français', color: 'from-[#3b82f6] to-[#1d4ed8]', query: 'Rap Francais', icon: TrendingUp },
+  { id: 'ambiance', name: 'Ambiance & Chill', color: 'from-[#10b981] to-[#047857]', query: 'Lofi Chill', icon: Heart },
+  { id: 'monde', name: 'Musique du Monde', color: 'from-[#06b6d4] to-[#0891b2]', query: 'World music', icon: Globe },
+  { id: 'classique', name: 'Classique & Jazz', color: 'from-[#eab308] to-[#a16207]', query: 'Classique', icon: Music2 }
+];
 
 export default function SearchPage() {
   const { 
@@ -66,6 +82,40 @@ export default function SearchPage() {
 
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const [spotifyRegion, setSpotifyRegion] = useState('global'); // 'global' | 'france'
+  const [isGenreLoading, setIsGenreLoading] = useState(false);
+
+  const handleGenreClick = async (genre) => {
+    if (isGenreLoading) return;
+    setIsGenreLoading(true);
+    const toastId = toast.loading(`Recherche des meilleurs titres ${genre.name}...`, {
+      style: {
+        background: '#121110',
+        color: '#fff',
+        border: '1px solid rgba(255,255,255,0.1)'
+      }
+    });
+
+    try {
+      const data = await searchUnified(genre.query, audioMode);
+      if (data && data.tracks && data.tracks.length > 0) {
+        toast.success(`Voici la sélection ${genre.name} !`, { id: toastId });
+        setSelectedPlaylist({
+          title: genre.name,
+          description: `Les titres les plus écoutés du genre ${genre.name}.`,
+          cover: data.tracks[0].thumbnail || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&q=80',
+          era: 'Sélection Spéciale',
+          tracks: data.tracks
+        });
+      } else {
+        toast.error(`Aucun titre trouvé pour le genre ${genre.name}`, { id: toastId });
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur lors de la récupération des titres du genre.", { id: toastId });
+    } finally {
+      setIsGenreLoading(false);
+    }
+  };
 
   // Top 50 Spotify dynamique (si aucune recherche active)
   const spotifyTop50Tracks = useMemo(() => {
@@ -73,14 +123,14 @@ export default function SearchPage() {
   }, [spotifyRegion]);
 
   const handlePlay = (track, list = null, idx = -1) => {
-    if (currentTrack?.videoId === track.videoId || (currentTrack?.title === track.title && currentTrack?.artist === track.artist)) {
+    if (isCurrentTrack(track)) {
       togglePlayPause();
     } else {
       if (list && list.length > 0) {
-        const foundIdx = idx >= 0 ? idx : list.findIndex(t => (t.videoId && t.videoId === track.videoId) || t.title === track.title);
+        const foundIdx = idx >= 0 ? idx : list.findIndex(t => (t.id != null && track.id != null && String(t.id) === String(track.id)) || (t.videoId && t.videoId === track.videoId));
         setQueueAndPlay(list, foundIdx >= 0 ? foundIdx : 0);
       } else if (results.tracks && results.tracks.length > 0) {
-        const foundIdx = results.tracks.findIndex(t => (t.videoId && t.videoId === track.videoId) || t.title === track.title);
+        const foundIdx = results.tracks.findIndex(t => (t.id != null && track.id != null && String(t.id) === String(track.id)) || (t.videoId && t.videoId === track.videoId));
         setQueueAndPlay(results.tracks, foundIdx >= 0 ? foundIdx : 0);
       } else {
         play(track);
@@ -90,7 +140,7 @@ export default function SearchPage() {
 
   const handlePlayTracklist = (tracklist, idx) => {
     const track = tracklist[idx];
-    if (currentTrack?.videoId === track.videoId || currentTrack?.title === track.title) {
+    if (isCurrentTrack(track)) {
       togglePlayPause();
     } else {
       setQueueAndPlay(tracklist, idx);
@@ -116,142 +166,44 @@ export default function SearchPage() {
     if (!query.trim()) {
       return FEATURED_ARTISTS;
     }
-
-    if (!results.artists || results.artists.length === 0) {
-      return [];
-    }
-
-    const qNorm = query.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const qKey = normalizeArtistKey(qNorm);
-
-    const uniqueMap = new Map();
-
-    for (const artist of results.artists) {
-      const cleanName = getMainArtistName(artist.name);
-      if (!cleanName || isJunkArtist(cleanName)) continue;
-
-      const key = normalizeArtistKey(cleanName);
-      if (!key) continue;
-
-      const isExact = key === qKey || cleanName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === qNorm;
-      const isVerified = Boolean(
-        artist.isOfficial || 
-        artist.isVerified || 
-        artist.isFeatured || 
-        (artist.nbFans && artist.nbFans > 50000)
-      );
-
-      const existing = uniqueMap.get(key);
-      if (!existing) {
-        uniqueMap.set(key, {
-          ...artist,
-          name: cleanName,
-          isExact,
-          isVerified
-        });
-      } else {
-        if (!existing.artwork && artist.artwork) existing.artwork = artist.artwork;
-        if ((artist.nbFans || 0) > (existing.nbFans || 0)) existing.nbFans = artist.nbFans;
-        if (isExact) existing.isExact = true;
-        if (isVerified) existing.isVerified = true;
-      }
-    }
-
-    const list = Array.from(uniqueMap.values());
-
-    // Tri strict : match exact en premier, puis certifiés / très populaires, puis score
-    list.sort((a, b) => {
-      if (a.isExact && !b.isExact) return -1;
-      if (!a.isExact && b.isExact) return 1;
-      if (a.isVerified && !b.isVerified) return -1;
-      if (!a.isVerified && b.isVerified) return 1;
-      return (b.dominanceScore || b.nbFans || 0) - (a.dominanceScore || a.nbFans || 0);
-    });
-
-    return list;
+    return results.artists || [];
   }, [query, results.artists]);
 
-  // 2. Détection dynamique du "Top Match" (Meilleur Résultat : Carte Artiste vs Carte Titre)
+  // 2. Détection du "Top Match" (Meilleur Résultat : Titre ou Artiste selon arbitrage de notoriété)
   const topMatch = useMemo(() => {
     if (!query.trim()) return null;
-    const qClean = query.trim().toLowerCase();
-    const qNorm = qClean.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const qKey = normalizeArtistKey(qClean);
-
-    const topArtist = artistList.length > 0 ? artistList[0] : null;
-    const topTrack = results.tracks && results.tracks.length > 0 ? results.tracks[0] : null;
-
-    if (!topArtist && !topTrack) return null;
-    if (topArtist && !topTrack) return { type: 'artist', data: topArtist };
-    if (!topArtist && topTrack) return { type: 'track', data: topTrack };
-
-    const artistName = getMainArtistName(topArtist.name).toLowerCase();
-    const artistNameNorm = artistName.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const artistKey = normalizeArtistKey(artistName);
-
-    const trackTitle = (topTrack.cleanTitle || topTrack.title || '').toLowerCase();
-    const trackTitleNorm = trackTitle.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-    // a) Nom d'artiste correspond exactement -> Carte Artiste
-    if (artistKey === qKey || artistNameNorm === qNorm) {
-      return { type: 'artist', data: topArtist };
+    if (results.bestMatch) {
+      return results.bestMatch;
     }
-
-    // b) Titre de la chanson correspond exactement (et pas l'artiste) -> Carte Titre
-    if (trackTitleNorm === qNorm || trackTitle === qClean) {
-      return { type: 'track', data: topTrack };
+    if (results.bestArtist) {
+      return { type: 'artist', data: results.bestArtist };
     }
-
-    // c) Nom d'artiste commence par la requête (ex: "daft" -> "Daft Punk")
-    if (artistNameNorm.startsWith(qNorm) || artistKey.startsWith(qKey)) {
-      if (!trackTitleNorm.startsWith(qNorm)) {
-        return { type: 'artist', data: topArtist };
-      }
+    if (results.tracks && results.tracks.length > 0) {
+      return { type: 'track', data: results.tracks[0] };
     }
-
-    // d) Titre commence par la requête (ex: "blinding" -> "Blinding Lights")
-    if (trackTitleNorm.startsWith(qNorm) && !artistNameNorm.startsWith(qNorm)) {
-      return { type: 'track', data: topTrack };
-    }
-
-    // e) Fallback par popularité/dominance de l'artiste
-    if (topArtist.dominanceScore > 20000 || topArtist.isVerified || topArtist.isExact) {
-      return { type: 'artist', data: topArtist };
-    }
-
-    return { type: 'track', data: topTrack };
-  }, [query, artistList, results.tracks]);
+    return null;
+  }, [query, results.bestMatch, results.bestArtist, results.tracks]);
 
   // 3. Titres recommandés à côté du Top Match ("Top Titres")
   const topMatchTracks = useMemo(() => {
-    if (!query.trim() || !results.tracks) return [];
-
-    if (topMatch?.type === 'artist' && topMatch.data) {
-      const artistName = topMatch.data.name;
-      // Privilégier les morceaux de cet artiste
-      const artistTracks = results.tracks.filter(t => isArtistMatch(t.artist, artistName));
-      if (artistTracks.length >= 3) {
-        return artistTracks.slice(0, 5);
-      }
+    if (!query.trim()) return [];
+    if (topMatch?.type === 'artist' && results.bestArtistTracks && results.bestArtistTracks.length > 0) {
+      return results.bestArtistTracks.slice(0, 5);
     }
-
-    // Sinon afficher les morceaux les plus pertinents
-    if (topMatch?.type === 'track' && topMatch.data) {
-      const otherTracks = results.tracks.filter(t => t.videoId !== topMatch.data.videoId);
-      return [topMatch.data, ...otherTracks].slice(0, 5);
+    if (results.tracks && results.tracks.length > 0) {
+      return results.tracks.slice(0, 5);
     }
-
-    return results.tracks.slice(0, 5);
-  }, [query, results.tracks, topMatch]);
+    return [];
+  }, [query, topMatch, results.bestArtistTracks, results.tracks]);
 
   // Morceaux restants pour l'onglet "Tous"
   const remainingTracks = useMemo(() => {
     if (!results.tracks) return [];
-    const usedIds = new Set(topMatchTracks.map(t => t.videoId));
+    const usedIds = new Set(topMatchTracks.map(t => t.videoId || t.id));
     if (topMatch?.type === 'track' && topMatch.data) {
-      usedIds.add(topMatch.data.videoId);
+      usedIds.add(topMatch.data.videoId || topMatch.data.id);
     }
-    return results.tracks.filter(t => !usedIds.has(t.videoId));
+    return results.tracks.filter(t => !usedIds.has(t.videoId || t.id));
   }, [results.tracks, topMatchTracks, topMatch]);
 
   // Live tracks pour la section dédiée
@@ -442,7 +394,7 @@ export default function SearchPage() {
 
       {/* Notifications Hors-ligne / Erreurs */}
       <div className="w-full">
-        {(isOffline || results.isOffline) && (
+        {(typeof navigator !== 'undefined' && !navigator.onLine && (isOffline || results.isOffline)) && (
           <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium mb-4 flex items-center justify-between gap-3 shadow-xl">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0 text-amber-400">
@@ -564,147 +516,49 @@ export default function SearchPage() {
           )}
 
           {/* ========================================================================= */}
-          {/* 🌟 VRAI TOP 50 SPOTIFY (SI AUCUNE RECHERCHE ET ONGLETS TOUS/TITRES)         */}
+          {/* 🌟 PAGES INITIALE : GENRES & CATÉGORIES                                   */}
           {/* ========================================================================= */}
-          {!query && (activeFilter === 'all' || activeFilter === 'tracks') && (
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-3 border-b border-white/10">
-                <div>
-                  <h2 className="text-base sm:text-lg font-black text-white uppercase tracking-tight flex items-center gap-2.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#1DB954] shadow-[0_0_10px_#1DB954]" />
-                    <TrendingUp size={20} className="text-[#1DB954]" />
-                    <span>Top 50 Spotify ({spotifyRegion === 'france' ? 'France 🇫🇷' : 'Global 🌐'})</span>
+          {!query && (
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+              className="space-y-8"
+            >
+              {/* Grille de Genres & Catégories style Spotify Premium */}
+              <div className="space-y-4">
+                <div className="pb-2 border-b border-white/5">
+                  <h2 className="text-base md:text-lg font-black text-white tracking-tight flex items-center gap-2">
+                    <Sparkles size={18} style={{ color: currentTheme.primary }} />
+                    <span>Parcourir tout</span>
                   </h2>
-                  <p className="text-xs text-gray-400 font-medium mt-0.5">
-                    Le classement mondial des morceaux les plus écoutés en ce moment
-                  </p>
                 </div>
-
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setQueueAndPlay(spotifyTop50Tracks, 0)}
-                    className="px-4 py-2 bg-[#1DB954] hover:bg-[#1ed760] text-black text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center gap-2 shadow-lg hover:scale-105 active:scale-95 cursor-pointer"
-                  >
-                    <Play size={13} fill="currentColor" className="stroke-none" />
-                    <span>Tout Lire</span>
-                  </button>
-
-                  <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 p-1 rounded-xl">
-                    <button
-                      onClick={() => setSpotifyRegion('global')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                        spotifyRegion === 'global'
-                          ? 'bg-[#1DB954] text-black shadow-md font-black'
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <Globe size={13} />
-                      <span>Global 🌐</span>
-                    </button>
-                    <button
-                      onClick={() => setSpotifyRegion('france')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                        spotifyRegion === 'france'
-                          ? 'bg-[#1DB954] text-black shadow-md font-black'
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <span>France 🇫🇷</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* LISTE SPOTIFY STYLE TOP 50 */}
-              <div className="bg-[#121110]/80 border border-white/10 rounded-2xl overflow-hidden divide-y divide-white/5 shadow-2xl">
-                {spotifyTop50Tracks.map((track, idx) => {
-                  const isPlayingThis = currentTrack?.videoId === track.videoId && isPlaying;
-                  const isCurrentActive = isCurrentTrack(track);
-                  return (
-                    <div
-                      key={`top50-search-${spotifyRegion}-${track.videoId}-${idx}`}
-                      onClick={() => handlePlayTracklist(spotifyTop50Tracks, idx)}
-                      className={`flex items-center justify-between px-4 py-3 hover:bg-white/[0.08] transition-all duration-200 cursor-pointer group ${
-                        isCurrentActive ? 'bg-[#1DB954]/15 border-l-4 border-l-[#1DB954]' : ''
-                      }`}
-                    >
-                      <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                        <span className={`w-7 text-center font-mono font-bold text-xs shrink-0 ${
-                          idx < 3 ? 'text-[#1DB954] font-black text-sm' : 'text-gray-500'
-                        }`}>
-                          #{track.rank || idx + 1}
-                        </span>
-
-                        <div className="relative w-12 h-12 rounded-md overflow-hidden bg-black/40 border border-white/10 shrink-0 shadow-md">
-                          <TrackImage src={track.thumbnail} alt={track.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-200">
-                            <div className="w-8 h-8 rounded-full bg-[#1DB954] text-black flex items-center justify-center shadow-lg transform scale-90 group-hover:scale-100 transition-transform duration-200">
-                              {isPlayingThis ? (
-                                <Pause size={14} fill="currentColor" className="stroke-none" />
-                              ) : (
-                                <Play size={14} fill="currentColor" className="ml-0.5 stroke-none" />
-                              )}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-4">
+                  {GENRES.map((genre) => {
+                    const GenreIcon = genre.icon;
+                    return (
+                      <div
+                        key={genre.id}
+                        onClick={() => handleGenreClick(genre)}
+                        className={`relative overflow-hidden rounded-2xl h-28 md:h-32 bg-gradient-to-br ${genre.color} p-4 cursor-pointer hover:scale-[1.03] active:scale-95 hover:shadow-lg transition-all duration-300 group shadow-md border border-white/5`}
+                      >
+                        <div className="flex flex-col h-full justify-between">
+                          <h3 className="text-base sm:text-lg font-black text-white tracking-tight leading-tight">
+                            {genre.name}
+                          </h3>
+                          <div className="flex justify-between items-end">
+                            <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-md">
+                              <Play size={12} fill="currentColor" className="text-white ml-0.5" />
                             </div>
-                          </div>
-                          {isPlayingThis && (
-                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                              <div className="flex items-end gap-0.5 h-3">
-                                <span className="w-1 animate-bounce rounded-full h-full bg-[#1DB954]" />
-                                <span className="w-1 animate-bounce rounded-full h-2/3 delay-75 bg-[#1DB954]" />
-                                <span className="w-1 animate-bounce rounded-full h-4/5 delay-150 bg-[#1DB954]" />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <p className={`text-xs md:text-sm font-bold truncate tracking-tight ${
-                            isCurrentActive ? 'text-[#1DB954]' : 'text-white group-hover:text-[#1DB954]'
-                          }`}>
-                            {track.title}
-                          </p>
-                          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-gray-400 font-medium truncate">
-                            <span 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigate(`/artist/${encodeURIComponent(getMainArtistName(track.artist))}`);
-                              }}
-                              className="hover:text-[#1DB954] transition-colors truncate"
-                            >
-                              {track.artist}
-                            </span>
-                            {track.album && (
-                              <>
-                                <span className="hidden sm:inline text-gray-600">•</span>
-                                <span className="hidden sm:inline text-gray-500 truncate">{track.album}</span>
-                              </>
-                            )}
+                            <GenreIcon className="w-12 h-12 text-white/20 absolute -right-2 -bottom-2 transform rotate-12 group-hover:scale-110 group-hover:rotate-6 transition-all duration-300" />
                           </div>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-4 text-xs font-mono text-gray-400 shrink-0">
-                        <span className="hidden md:block text-[11px] text-[#1DB954]/90 font-semibold bg-[#1DB954]/10 px-2.5 py-1 rounded-full border border-[#1DB954]/20">
-                          {track.plays || (track.popularity ? `${track.popularity}% pop` : 'Top Chart')}
-                        </span>
-                        <span className="w-12 text-right">{formatDuration(track.duration)}</span>
-                        
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleLike(track);
-                          }}
-                          className="p-1.5 hover:scale-110 active:scale-95 transition-transform cursor-pointer"
-                          title={isLiked(track) ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-                        >
-                          <Heart size={16} className={isLiked(track) ? 'text-red-500 fill-red-500' : 'text-gray-500 hover:text-white'} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* ========================================================================= */}
@@ -740,9 +594,9 @@ export default function SearchPage() {
                         key={`artist-top-bar-${artist.id || idx}`}
                         onClick={() => navigate(`/artist/${encodeURIComponent(artist.name)}`)}
                         className="flex flex-col items-center group cursor-pointer shrink-0 transition-all duration-300 hover:-translate-y-1 active:scale-95"
-                        style={{ width: '96px' }}
+                        style={{ width: '100px' }}
                       >
-                        <div className="relative w-20 h-20 md:w-22 md:h-22 rounded-full p-0.5 border border-white/15 group-hover:border-[#1DB954]/50 transition-all duration-300 shadow-xl">
+                        <div className="relative w-20 h-20 md:w-22 md:h-22 rounded-full p-0.5 border border-white/10 group-hover:border-[#1DB954]/50 transition-all duration-300 shadow-xl group-hover:shadow-[0_0_15px_rgba(29,185,84,0.35)]">
                           <div className="w-full h-full rounded-full overflow-hidden relative bg-[#12182b]">
                             <ArtistAvatar 
                               artistName={artist.name}
@@ -753,7 +607,7 @@ export default function SearchPage() {
                               <button
                                 onClick={(e) => handlePlayArtist(e, artist.name)}
                                 className="w-10 h-10 rounded-full flex items-center justify-center shadow-2xl transform scale-90 group-hover:scale-100 transition-transform active:scale-90"
-                                style={{ backgroundColor: currentTheme.primary, color: '#000000' }}
+                                style={{ backgroundColor: '#1DB954', color: '#000000' }}
                                 title={`Écouter ${artist.name}`}
                               >
                                 <Play size={16} fill="currentColor" className="ml-0.5 stroke-none" />
@@ -762,11 +616,11 @@ export default function SearchPage() {
                           </div>
                         </div>
 
-                        <p className="mt-2.5 text-xs font-bold text-white text-center truncate w-full group-hover:text-[#1DB954] transition-colors">
+                        <p className="mt-2 text-xs font-bold text-white text-center truncate w-full group-hover:text-[#1DB954] transition-colors">
                           {artist.name}
                         </p>
                         <span className="text-[10px] text-gray-400 font-medium truncate w-full text-center">
-                          {artist.genre || 'Artiste'}
+                          {artist.genre || 'Artiste'} {artist.nbFans ? `• ${formatListenersShort(artist.nbFans)}` : ''}
                         </span>
                       </div>
                     ))}
@@ -794,65 +648,57 @@ export default function SearchPage() {
                       <div 
                         id="search-hero-artist-card"
                         onClick={() => navigate(`/artist/${encodeURIComponent(topMatch.data.name)}`)}
-                        className="group relative p-6 rounded-3xl bg-[#14110c] hover:bg-[#1a160f] border border-white/10 hover:border-white/20 transition-all duration-300 cursor-pointer overflow-hidden shadow-2xl flex flex-col justify-between hover:shadow-black/60 hover:-translate-y-0.5 active:scale-[0.99]"
+                        className="group relative p-6 rounded-3xl bg-[#14110c] hover:bg-[#1a160f] border border-white/10 hover:border-white/20 transition-all duration-300 cursor-pointer overflow-hidden shadow-2xl flex flex-col justify-between hover:shadow-black/60 hover:-translate-y-0.5 active:scale-[0.99] min-h-[260px]"
                         style={{
                           background: `linear-gradient(145deg, ${currentTheme.bgAccent} 0%, #14110c 100%)`
                         }}
                       >
-                        <div>
-                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
-                            <div className="relative w-28 h-28 md:w-32 md:h-32 shrink-0 rounded-full overflow-hidden shadow-2xl border-2 border-white/20 group-hover:scale-105 transition-transform duration-500 bg-[#12182b]">
-                              <ArtistAvatar 
-                                artistName={topMatch.data.name} 
-                                fallbackSrc={topMatch.data.artwork} 
-                                className="w-full h-full object-cover" 
-                              />
-                            </div>
+                        <div className="flex flex-col gap-4">
+                          <div className="relative w-28 h-28 shrink-0 rounded-full overflow-hidden shadow-2xl border-2 border-white/20 group-hover:scale-105 group-hover:shadow-[0_0_15px_rgba(29,185,84,0.4)] transition-all duration-500 bg-[#12182b]">
+                            <ArtistAvatar 
+                              artistName={topMatch.data.name} 
+                              fallbackSrc={topMatch.data.artwork} 
+                              className="w-full h-full object-cover" 
+                            />
+                          </div>
 
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                <span 
-                                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-sm"
-                                  style={{ 
-                                    backgroundColor: `${currentTheme.primary}20`, 
-                                    color: currentTheme.primary,
-                                    borderColor: `${currentTheme.primary}40` 
-                                  }}
-                                >
-                                  <User size={11} />
-                                  <span>Artiste</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <span 
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-sm bg-[#1DB954]/10 text-[#1DB954] border-[#1DB954]/20"
+                              >
+                                <User size={11} />
+                                <span>Artiste</span>
+                              </span>
+
+                              {topMatch.data.isVerified && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-mono text-[#1DB954] bg-[#1DB954]/10 px-2 py-0.5 rounded-full border border-[#1DB954]/30 font-bold">
+                                  <CheckCircle2 size={12} /> Officiel
                                 </span>
-
-                                {topMatch.data.isVerified && (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-mono text-[#1DB954] bg-[#1DB954]/10 px-2 py-0.5 rounded-full border border-[#1DB954]/30 font-bold">
-                                    <CheckCircle2 size={12} /> Officiel
-                                  </span>
-                                )}
-                              </div>
-
-                              <h3 className="text-xl md:text-2xl font-black text-white leading-tight truncate group-hover:text-amber-300 transition-colors tracking-tight">
-                                {topMatch.data.name}
-                              </h3>
-
-                              <p className="text-xs text-gray-300 mt-1 truncate font-medium">
-                                {topMatch.data.genre || 'Artiste'} {topMatch.data.nbFans ? `• ${formatListenersShort(topMatch.data.nbFans)}` : ''}
-                              </p>
+                              )}
                             </div>
+
+                            <h3 className="text-2xl md:text-3xl font-black text-white leading-tight truncate group-hover:text-[#1DB954] transition-colors tracking-tight">
+                              {topMatch.data.name}
+                            </h3>
+
+                            <p className="text-xs text-gray-400 mt-1 truncate font-medium">
+                              {topMatch.data.genre || 'Artiste'} {topMatch.data.nbFans ? `• ${formatListenersShort(topMatch.data.nbFans)} auditeurs` : ''}
+                            </p>
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between mt-6 pt-4 border-t border-white/10">
+                        <div className="flex items-center justify-between mt-6 pt-4 border-t border-white/5">
                           <span className="text-xs text-gray-400 font-mono">
                             Voir le profil complet
                           </span>
 
                           <button
                             onClick={(e) => handlePlayArtist(e, topMatch.data.name)}
-                            className="w-12 h-12 rounded-full flex items-center justify-center shadow-2xl transition-transform hover:scale-110 active:scale-95 cursor-pointer"
-                            style={{ backgroundColor: currentTheme.primary, color: '#000000' }}
+                            className="w-14 h-14 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95 bg-[#1DB954] text-black shadow-lg hover:shadow-[0_0_15px_rgba(29,185,84,0.5)] cursor-pointer"
                             title={`Écouter ${topMatch.data.name}`}
                           >
-                            <Play size={20} fill="currentColor" className="ml-0.5 stroke-none" />
+                            <Play size={24} fill="currentColor" className="ml-1 stroke-none" />
                           </button>
                         </div>
                       </div>
@@ -861,87 +707,96 @@ export default function SearchPage() {
                       <div 
                         id="search-hero-track-card"
                         onClick={() => handlePlay(topMatch.data, results.tracks)}
-                        className="group relative p-6 rounded-3xl bg-[#14110c] hover:bg-[#1a160f] border border-white/10 hover:border-white/20 transition-all duration-300 cursor-pointer overflow-hidden shadow-2xl flex flex-col justify-between hover:shadow-black/60 hover:-translate-y-0.5 active:scale-[0.99]"
+                        className="group relative p-6 rounded-3xl bg-[#14110c] hover:bg-[#1a160f] border border-white/10 hover:border-white/20 transition-all duration-300 cursor-pointer overflow-hidden shadow-2xl flex flex-col justify-between hover:shadow-black/60 hover:-translate-y-0.5 active:scale-[0.99] min-h-[260px]"
                         style={{
                           background: `linear-gradient(145deg, ${currentTheme.bgAccent} 0%, #14110c 100%)`
                         }}
                       >
-                        <div>
-                          <div className="flex items-start gap-4">
-                            <div className="relative w-28 h-28 md:w-32 md:h-32 shrink-0 rounded-2xl overflow-hidden shadow-2xl border border-white/10 group-hover:scale-105 transition-transform duration-300">
-                              <TrackImage 
-                                src={topMatch.data.thumbnail} 
-                                alt={topMatch.data.title} 
-                                className="w-full h-full object-cover" 
-                              />
-                              <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-90 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                <div 
-                                  className="w-12 h-12 rounded-full flex items-center justify-center shadow-2xl transition-transform active:scale-90"
-                                  style={{ backgroundColor: currentTheme.primary, color: '#000000' }}
-                                >
-                                  {isCurrentTrack(topMatch.data) && isPlaying ? (
-                                    <Pause size={22} fill="currentColor" />
-                                  ) : (
-                                    <Play size={22} fill="currentColor" className="ml-0.5" />
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex-1 min-w-0 pt-0.5">
-                              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                <span 
-                                  className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border"
-                                  style={{ 
-                                    backgroundColor: `${currentTheme.primary}20`, 
-                                    color: currentTheme.primary,
-                                    borderColor: `${currentTheme.primary}40` 
-                                  }}
-                                >
-                                  Titre • Top Match
-                                </span>
-                              </div>
-
-                              <h3 className="text-lg md:text-xl font-extrabold text-white leading-snug truncate group-hover:text-amber-300 transition-colors">
-                                {topMatch.data.cleanTitle || topMatch.data.title}
-                              </h3>
-
-                              <p 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigate(`/artist/${encodeURIComponent(getMainArtistName(topMatch.data.artist))}`);
-                                }}
-                                className="text-xs md:text-sm text-gray-300 mt-1 truncate hover:underline hover:text-white cursor-pointer font-medium"
+                        <div className="flex flex-col gap-4">
+                          <div className="relative w-28 h-28 shrink-0 rounded-2xl overflow-hidden shadow-2xl border border-white/10 group-hover:scale-105 transition-transform duration-300">
+                            <TrackImage 
+                              src={topMatch.data.thumbnail} 
+                              alt={topMatch.data.title} 
+                              className="w-full h-full object-cover" 
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                              <div 
+                                className="w-12 h-12 rounded-full flex items-center justify-center shadow-2xl transition-transform active:scale-90 bg-[#1DB954] text-black"
                               >
-                                Titre • <span className="font-bold text-white">{getMainArtistName(topMatch.data.artist)}</span>
-                              </p>
-
-                              {topMatch.data.album && (
-                                <p className="text-[11px] text-gray-400 mt-1 truncate">
-                                  {topMatch.data.album}
-                                </p>
-                              )}
+                                {isCurrentTrack(topMatch.data) && isPlaying ? (
+                                  <Pause size={22} fill="currentColor" />
+                                ) : (
+                                  <Play size={22} fill="currentColor" className="ml-1" />
+                                )}
+                              </div>
                             </div>
+                          </div>
+
+                          <div className="flex-1 min-w-0 pt-0.5">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <span 
+                                className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border bg-[#1DB954]/10 text-[#1DB954] border-[#1DB954]/20"
+                              >
+                                Titre • Meilleur résultat
+                              </span>
+                            </div>
+
+                            <h3 className="text-xl md:text-2xl font-black text-white leading-snug truncate group-hover:text-[#1DB954] transition-colors">
+                              {topMatch.data.cleanTitle || topMatch.data.title}
+                            </h3>
+
+                            <p 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/artist/${encodeURIComponent(getMainArtistName(topMatch.data.artist))}`);
+                              }}
+                              className="text-xs md:text-sm text-gray-300 mt-1 truncate hover:underline hover:text-white cursor-pointer font-medium"
+                            >
+                              Par <span className="font-bold text-white hover:text-[#1DB954] transition-colors">{getMainArtistName(topMatch.data.artist)}</span>
+                            </p>
+
+                            {topMatch.data.album && (
+                              <p className="text-[11px] text-gray-400 mt-1 truncate font-medium">
+                                Album : {topMatch.data.album}
+                              </p>
+                            )}
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between mt-5 pt-4 border-t border-white/10">
+                        <div className="flex items-center justify-between mt-5 pt-4 border-t border-white/5">
                           <span className="text-xs text-gray-400 font-mono">
                             {formatDuration(topMatch.data.duration)}
                           </span>
 
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleLike(topMatch.data);
-                            }}
-                            className="px-3.5 py-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition-all flex items-center gap-1.5 border border-white/10 active:scale-95 cursor-pointer"
-                          >
-                            <Heart size={15} className={isLiked(topMatch.data) ? 'fill-red-500 text-red-500' : 'text-gray-400'} />
-                            <span className={isLiked(topMatch.data) ? 'text-red-400 font-bold text-xs' : 'text-xs font-medium'}>
-                              {isLiked(topMatch.data) ? 'Aimé' : 'Favori'}
-                            </span>
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleLike(topMatch.data);
+                              }}
+                              className="px-3.5 py-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition-all flex items-center gap-1.5 border border-white/10 active:scale-95 cursor-pointer"
+                            >
+                              <Heart size={15} className={isLiked(topMatch.data) ? 'fill-red-500 text-red-500' : 'text-gray-400'} />
+                              <span className={isLiked(topMatch.data) ? 'text-red-400 font-bold text-xs' : 'text-xs font-medium'}>
+                                {isLiked(topMatch.data) ? 'Aimé' : 'Favori'}
+                              </span>
+                            </button>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePlay(topMatch.data, results.tracks);
+                              }}
+                              className="w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-110 active:scale-95 bg-[#1DB954] text-black hover:shadow-[0_0_15px_rgba(29,185,84,0.5)] cursor-pointer"
+                              title={`Écouter ${topMatch.data.cleanTitle || topMatch.data.title}`}
+                            >
+                              {isCurrentTrack(topMatch.data) && isPlaying ? (
+                                <Pause size={24} fill="currentColor" />
+                              ) : (
+                                <Play size={24} fill="currentColor" className="ml-1 stroke-none" />
+                              )}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}

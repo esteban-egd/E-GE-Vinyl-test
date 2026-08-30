@@ -4,9 +4,9 @@ import { getAudioStreamUrl } from './audioResolver';
  * audioDownloadApi.js
  * Resolver audio unifié cross-platform (EXE Electron + APK Mobile).
  */
-export async function fetchFullAudioBlob(title, artist, videoId = null) {
+export async function fetchFullAudioBlob(title, artist, videoId = null, targetDuration = 0) {
   try {
-    const directStreamUrl = await getAudioStreamUrl(title, artist, videoId);
+    const directStreamUrl = await getAudioStreamUrl(title, artist, videoId, targetDuration);
     if (!directStreamUrl) return null;
     
     let mimeType = 'audio/webm'; // fallback

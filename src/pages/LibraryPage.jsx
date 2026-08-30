@@ -929,7 +929,7 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
 
   const { likedTracks, toggleLike, isLiked } = useLikes();
   const playlistTracks = usePlaylistTracks(customPlaylist?.id);
-  const { setQueueAndPlay, currentTrack, isPlaying, togglePlayPause } = useAudio();
+  const { setQueueAndPlay, currentTrack, isPlaying, togglePlayPause, isCurrentTrack } = useAudio();
   const { 
     downloadedTrackIds, 
     downloadTrack, 
@@ -992,7 +992,7 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
   };
 
   const handleTrackClick = (track, idx) => {
-    if (currentTrack?.videoId === track.videoId || currentTrack?.title === track.title) {
+    if (isCurrentTrack(track)) {
       togglePlayPause();
     } else {
       setQueueAndPlay(filteredTracks, idx);
@@ -1223,7 +1223,7 @@ function SpotifyPlaylistInlineDetail({ detailObj, onClose, primaryColor }) {
           ) : (
             filteredTracks.map((track, idx) => {
               const trackId = track.videoId || track.id;
-              const isCurrent = currentTrack?.videoId === trackId || currentTrack?.title === track.title;
+              const isCurrent = isCurrentTrack(track);
               const isThisPlaying = isCurrent && isPlaying;
               const isTrackDownloadedInCache = downloadedTrackIds.has(trackId);
               const isDownloadingThis = isDownloading.has(trackId);

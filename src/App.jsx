@@ -29,12 +29,24 @@ import { MOCK_VINYLS } from './data/mockVinyls';
 
 function AppContent() {
   const { user, loading, signInAsGuest } = useAuth();
-  const { currentTrack, setQueueAndPlay, play } = useAudio();
+  const { currentTrack, setQueueAndPlay, play, resetPlayer } = useAudio();
   const location = useLocation();
   const navigate = useNavigate();
   const [showLoginOnWeb, setShowLoginOnWeb] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const prevUserRef = useRef(user);
+  const prevUserIdRef = useRef(user?.id || (user?.is_guest ? 'guest' : null));
+
+  // Reset audio playback whenever user switches account or logs in/out
+  useEffect(() => {
+    const currentUserId = user?.id || (user?.is_guest ? 'guest' : null);
+    const prevUserId = prevUserIdRef.current;
+    if (prevUserId !== undefined && prevUserId !== currentUserId) {
+      console.log('[App] User session changed from', prevUserId, 'to', currentUserId, '- Resetting player');
+      resetPlayer();
+    }
+    prevUserIdRef.current = currentUserId;
+  }, [user, resetPlayer]);
 
   useEffect(() => {
     if (user) {

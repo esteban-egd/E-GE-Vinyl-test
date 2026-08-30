@@ -1,13 +1,16 @@
+import { useState } from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import { Home, Search, Library, Settings, Disc3, LogOut, User, X, Sparkles, ChevronRight } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-hot-toast';
+import GuestRestrictedModal from '../common/GuestRestrictedModal';
 
 export default function Sidebar({ isOpen = false, onClose = () => {} }) {
   const { currentTheme } = useTheme();
   const { user, profile, signOut } = useAuth();
   const location = useLocation();
+  const [showGuestModal, setShowGuestModal] = useState(false);
 
   const handleSignOut = async () => {
     try {
@@ -26,9 +29,19 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
     { path: '/settings', label: 'Thèmes & Réglages', icon: Settings },
   ];
 
-  const displayName = profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Audiophile';
-  const username = profile?.username ? `@${profile.username.replace('@', '')}` : (user?.email ? `@${user.email.split('@')[0]}` : '@audiophile');
-  const avatarUrl = profile?.avatar_url;
+  const isGuest = !user || user.is_guest;
+  const displayName = isGuest ? 'Invitations E-GE' : (profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Audiophile');
+  const username = isGuest ? 'Mode Invité' : (profile?.username ? `@${profile.username.replace('@', '')}` : (user?.email ? `@${user.email.split('@')[0]}` : '@audiophile'));
+  const avatarUrl = isGuest ? '' : profile?.avatar_url;
+
+  const handleProfileClick = (e) => {
+    if (isGuest) {
+      e.preventDefault();
+      setShowGuestModal(true);
+      return;
+    }
+    onClose();
+  };
 
   const content = (
     <div 
@@ -81,10 +94,10 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
         </div>
 
         {/* 2. Profil Widget en haut avec Avatar Dynamique */}
-        <Link
-          to="/profile"
-          onClick={onClose}
-          className="mt-1 p-2.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/5 hover:border-white/15 transition-all duration-300 flex items-center gap-3 group relative overflow-hidden"
+        <button
+          type="button"
+          onClick={handleProfileClick}
+          className="w-full mt-1 p-2.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/5 hover:border-white/15 transition-all duration-300 flex items-center gap-3 group relative overflow-hidden text-left cursor-pointer"
           style={{
             borderColor: location.pathname === '/profile' ? `${currentTheme.primary}40` : undefined,
             backgroundColor: location.pathname === '/profile' ? `${currentTheme.primary}12` : undefined
@@ -124,27 +137,28 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
               <p className="text-xs font-bold text-white truncate group-hover:text-white transition-colors">
                 {displayName}
               </p>
-              {user?.is_guest && (
-                <span className="text-[7.5px] px-1.5 py-0.2 rounded-full bg-[#c29e5a]/20 text-[#e1bb72] font-mono font-bold border border-[#c29e5a]/40 shrink-0">
-                  DÉMO
+              {isGuest ? (
+                <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-[#c29e5a]/15 text-[#e1bb72] font-semibold border border-[#c29e5a]/30 shrink-0">
+                  Invité
+                </span>
+              ) : (
+                <span className="text-[7.5px] px-1.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-neutral-400 font-mono shrink-0">
+                  PRO
                 </span>
               )}
             </div>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span 
-                className="text-[9.5px] font-semibold tracking-wide truncate max-w-[110px]"
+                className="text-[9.5px] font-semibold tracking-wide truncate max-w-[130px]"
                 style={{ color: currentTheme.primary }}
               >
-                {user?.is_guest ? 'Mode Invité' : username}
-              </span>
-              <span className="text-[8px] px-1.5 py-0.2 rounded-full bg-white/5 border border-white/10 text-neutral-400 font-mono">
-                {user?.is_guest ? 'GUEST' : 'PRO'}
+                {username}
               </span>
             </div>
           </div>
 
           <ChevronRight size={14} className="text-neutral-500 group-hover:text-white group-hover:translate-x-0.5 transition-all shrink-0" />
-        </Link>
+        </button>
       </div>
 
       {/* 3. Navigation Links */}
@@ -286,6 +300,14 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
           </div>
         </div>
       )}
+
+      {/* 6. Guest Restriction Modal */}
+      <GuestRestrictedModal
+        isOpen={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        title="Profil Privé & Personnalisation"
+        description="Le mode Invité est restreint. Connectez-vous ou créez un compte pour accéder à votre profil, changer votre avatar et vos informations personnelles."
+      />
     </>
   );
 }

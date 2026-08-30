@@ -6,7 +6,8 @@ import { usePlaylists } from '../hooks/usePlaylists';
 import { useFollowedArtists } from '../hooks/useFollowedArtists';
 import { useTheme } from '../context/ThemeContext';
 import { useDominantColor } from '../hooks/useDominantColor';
-import { getArtistDetails, getMainArtistName, getAlbumTracks, safeDecodeURI, getArtistAvatar } from '../services/musicDataService';
+import { getArtistFullData, getAlbumTracksDeezer } from '../services/artistService';
+import { getMainArtistName, safeDecodeURI, getArtistAvatar } from '../services/musicDataService';
 import { formatListeners, parseListenersCount } from '../utils/formatListeners';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import TrackImage from '../components/common/TrackImage';
@@ -109,19 +110,35 @@ export default function ArtistPage() {
       setIsBioExpanded(false);
       setScrollY(0);
       try {
-        const data = await getArtistDetails(decodedArtistName);
+        const data = await getArtistFullData(decodedArtistName);
         if (isMounted) {
-          setArtist(data);
+          if (data) {
+            setArtist(data);
+          } else {
+            setArtist({
+              name: decodedArtistName,
+              genre: 'Artiste',
+              avatar: getArtistAvatar(decodedArtistName),
+              banner: getArtistAvatar(decodedArtistName),
+              monthlyListeners: 0,
+              nbFans: 0,
+              topTracks: [],
+              albums: [],
+              relatedArtists: [],
+              bio: ''
+            });
+          }
         }
       } catch (err) {
         console.error('Erreur chargement artiste:', err);
         if (isMounted) {
           setArtist({
             name: decodedArtistName,
-            genre: 'Musique',
+            genre: 'Artiste',
             avatar: getArtistAvatar(decodedArtistName),
             banner: getArtistAvatar(decodedArtistName),
-            monthlyListeners: 'Artiste',
+            monthlyListeners: 0,
+            nbFans: 0,
             topTracks: [],
             albums: [],
             relatedArtists: [],
@@ -153,7 +170,7 @@ export default function ArtistPage() {
   };
 
   const handlePlayTrack = (track, idx, list) => {
-    if (currentTrack?.videoId === track.videoId || currentTrack?.title === track.title) {
+    if (isCurrentTrack(track)) {
       togglePlayPause();
     } else {
       const activeQueue = list || artist?.topTracks || [];
@@ -172,7 +189,7 @@ export default function ArtistPage() {
     window.scrollTo({ top: 400, behavior: 'smooth' });
 
     try {
-      const fetchedTracks = await getAlbumTracks(album, artist?.name);
+      const fetchedTracks = await getAlbumTracksDeezer(album.deezerId || album.id, artist?.name, album);
       if (fetchedTracks && fetchedTracks.length > 0) {
         setAlbumTracks(fetchedTracks);
       } else {
@@ -184,10 +201,14 @@ export default function ArtistPage() {
           setAlbumTracks(localTracks);
         } else {
           setAlbumTracks([{
+            id: `dz_alb_${album.id}`,
+            deezerId: album.id,
+            videoId: `dz_alb_${album.id}`,
             title: album.title,
             artist: album.artist || artist.name,
-            thumbnail: album.artwork,
+            thumbnail: album.artwork || album.cover,
             album: album.title,
+            albumId: album.id,
             source: 'deezer'
           }]);
         }
@@ -813,7 +834,7 @@ export default function ArtistPage() {
             {/* RIGHT COLUMN: About */}
             <div className="xl:col-span-1 flex flex-col max-w-full overflow-x-hidden pr-2 sm:pr-4 box-border">
               <h2 className="text-2xl font-bold text-white mb-6">À Propos</h2>
-              <div className="relative rounded-2xl overflow-hidden bg-[#181818] border border-white/5 flex flex-col w-full max-w-full box-border shadow-lg">
+              <div className="relative rounded-2xl overflow-hidden bg-[var(--color-theme-card-bg)] border border-white/5 flex flex-col w-full max-w-full box-border shadow-lg">
                 <div className="relative h-48 sm:h-64 md:h-56 w-full shrink-0 overflow-hidden group bg-black/40">
                   <img src={artist.avatar} alt={artist.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#181818] via-[#181818]/40 to-transparent" />
@@ -828,7 +849,7 @@ export default function ArtistPage() {
                   </div>
                 </div>
                 
-                <div className="px-6 pb-6 pt-2 flex-grow bg-[#181818]">
+                <div className="px-6 pb-6 pt-2 flex-grow bg-[var(--color-theme-card-bg)]">
                    <div 
                      className={`relative transition-all duration-700 ease-in-out overflow-hidden ${isBioExpanded ? 'max-h-[5000px]' : 'max-h-[72px]'}`}
                    >
@@ -962,7 +983,7 @@ export default function ArtistPage() {
                     window.scrollTo(0, 0);
                   }}
                   style={{ flex: '0 0 160px', minWidth: '160px' }}
-                  className="p-5 rounded-xl bg-[#181818] hover:bg-[#282828] transition-all duration-300 group cursor-pointer flex flex-col items-center text-center hover:shadow-2xl hover:-translate-y-1"
+                  className="p-5 rounded-xl bg-[var(--color-theme-card-bg)] hover:bg-[var(--color-theme-card-bg-hover)] transition-all duration-300 group cursor-pointer flex flex-col items-center text-center hover:shadow-2xl hover:-translate-y-1"
                 >
                   <div className="w-32 h-32 rounded-full overflow-hidden mb-5 shadow-2xl">
                     <img src={relArtist.picture} alt={relArtist.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />

@@ -2,492 +2,477 @@ import { useState, useEffect, useMemo } from 'react';
 import { useAudio } from '../context/AudioContext';
 import { 
   FEATURED_ARTISTS, 
-  FRESH_NEW_RELEASES, 
-  DECADE_PLAYLISTS, 
-  GENRE_PLAYLISTS,
-  TRENDING_TRACKS, 
   getMainArtistName,
-  isArtistMatch 
+  normalizeArtistKey
 } from '../services/musicDataService';
+import { 
+  getDeezerChartAlbums, 
+  getDeezerChartTracks, 
+  getDeezerChartArtists 
+} from '../services/discoveryService';
+import { getAlbumTracksDeezer } from '../services/artistService';
 import { useNavigate } from 'react-router-dom';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import AddToPlaylistModal from '../components/common/AddToPlaylistModal';
 import PlaylistDetailModal from '../components/common/PlaylistDetailModal';
-import TrackImage from '../components/common/TrackImage';
 import db from '../lib/db';
 import { 
-  Disc, 
   Search, 
   Play, 
   Pause,
-  ChevronRight, 
-  Plus,
   Heart,
-  Flame,
-  Clock,
-  Music2,
   Sparkles,
-  Layers,
-  RefreshCw
+  Flame,
+  Radio,
+  UserCheck
 } from 'lucide-react';
 import { useLikes } from '../hooks/useLikes';
 import { useAuth } from '../context/AuthContext';
-import { useTheme } from '../context/ThemeContext';
+
+const DEFAULT_HD_COVER = 'https://e-cdns-images.dzcdn.net/images/cover/03f273295988e0b6732f7a942512f5a0/500x500-000000-80-0-0.jpg';
 
 export default function HomePage() {
   const { user } = useAuth();
-  const { currentTheme } = useTheme();
-  const { play, setQueueAndPlay, isPlaying, currentTrack, togglePlayPause } = useAudio();
-  const { isLiked, toggleLike } = useLikes();
+  const { play, setQueueAndPlay, isPlaying, currentTrack, togglePlayPause, isCurrentTrack } = useAudio();
+  const { likedTracks } = useLikes();
   const navigate = useNavigate();
 
+  // Modals state
   const [selectedTrackForPlaylist, setSelectedTrackForPlaylist] = useState(null);
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
+
+  // Listening history
   const [recentPlayedTracks, setRecentPlayedTracks] = useState([]);
-  const [lastPlayedArtist, setLastPlayedArtist] = useState(null);
+  
+  // Deezer Live Discoveries / Chart Albums
+  const [newReleases, setNewReleases] = useState([]);
+  const [isLoadingReleases, setIsLoadingReleases] = useState(true);
 
-  // Dynamic Spotify New Releases state
-  const [newReleases, setNewReleases] = useState(FRESH_NEW_RELEASES);
-  const [isLoadingReleases, setIsLoadingReleases] = useState(false);
+  // Deezer Live Top Tracks & Artists
+  const [chartTracks, setChartTracks] = useState([]);
+  const [chartArtists, setChartArtists] = useState([]);
 
-  // Fetch real dynamic weekly Spotify new releases with fallback to curated releases
-  useEffect(() => {
-    let active = true;
-    async function fetchLiveReleases() {
-      setIsLoadingReleases(true);
-      try {
-        const response = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent('https://api.deezer.com/editorial/0/releases'));
-        if (response.ok) {
-          const data = await response.json();
-          if (data && data.data && data.data.length > 0) {
-            const formatted = data.data.slice(0, 8).map(item => ({
-              videoId: `dz_${item.id}`,
-              title: item.title,
-              mainTrackTitle: item.title,
-              artist: item.artist?.name || 'Artiste Spotify',
-              album: item.title,
-              thumbnail: item.cover_xl || item.cover_big || item.cover_medium,
-              duration: 210,
-              source: 'spotify',
-              year: item.release_date ? new Date(item.release_date).getFullYear().toString() : '2024',
-              type: item.record_type === 'single' ? 'Single' : 'Album',
-              genre: 'Sortie Officielle',
-              tracks: [
-                {
-                  videoId: `dz_${item.id}`,
-                  title: item.title,
-                  artist: item.artist?.name || 'Artiste Spotify',
-                  album: item.title,
-                  thumbnail: item.cover_xl || item.cover_big || item.cover_medium,
-                  duration: 210
-                }
-              ]
-            }));
-            if (active && formatted.length >= 4) {
-              setNewReleases(formatted);
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Live releases API fallback to curated releases:', e);
-      } finally {
-        if (active) setIsLoadingReleases(false);
-      }
-    }
-    fetchLiveReleases();
-    return () => { active = false; };
+  // Recommendations based on history + chart
+  const [recommendedTracks, setRecommendedTracks] = useState([]);
+  const [seedArtistName, setSeedArtistName] = useState('');
+  const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
+
+  // Dynamic greeting based on current time
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return "Bonjour";
+    if (hour >= 12 && hour < 18) return "Bon après-midi";
+    return "Bonsoir";
   }, []);
 
-  // Load listening history from Dexie DB
+  // Load user listening history from Dexie DB
   useEffect(() => {
     let isMounted = true;
     async function loadUserHistory() {
       try {
-        const history = await db.tracks.orderBy('addedAt').reverse().limit(12).toArray();
+        const history = await db.tracks.orderBy('addedAt').reverse().limit(16).toArray();
         if (isMounted && history && history.length > 0) {
           setRecentPlayedTracks(history);
-          setLastPlayedArtist(history[0].artist);
+          if (history[0]?.artist) {
+            setSeedArtistName(getMainArtistName(history[0].artist));
+          }
         }
       } catch (err) {
-        console.warn('Error loading listening history:', err);
+        console.warn('Erreur chargement historique:', err);
       }
     }
     loadUserHistory();
     return () => { isMounted = false; };
   }, [currentTrack]);
 
-  // Daily Mix compilation based on history or trending
-  const dailyMixPlaylist = useMemo(() => {
-    const baseTracks = recentPlayedTracks.length >= 4 
-      ? recentPlayedTracks 
-      : TRENDING_TRACKS.slice(0, 10);
-    return {
-      id: 'daily-mix-1',
-      title: 'Mix Quotidien #1',
-      description: 'Compilation personnalisée basée sur vos écoutes récentes et préférences musicales',
-      cover: baseTracks[0]?.thumbnail || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=80',
-      era: 'Sur mesure',
-      tracks: baseTracks
-    };
-  }, [recentPlayedTracks]);
+  // Fetch Deezer Official Chart (Albums, Tracks, Artists)
+  useEffect(() => {
+    let active = true;
+    async function loadDeezerChartData() {
+      setIsLoadingReleases(true);
+      try {
+        const [albums, tracks, artists] = await Promise.all([
+          getDeezerChartAlbums(18),
+          getDeezerChartTracks(25),
+          getDeezerChartArtists(12)
+        ]);
 
-  // Dynamic recommendations ("Pour vous")
-  const smartRecommendations = useMemo(() => {
-    const seedArtist = currentTrack?.artist || lastPlayedArtist;
-    if (!seedArtist) {
-      return newReleases.slice(0, 6);
+        if (active) {
+          if (albums && albums.length > 0) {
+            setNewReleases(albums);
+          }
+          if (tracks && tracks.length > 0) {
+            setChartTracks(tracks);
+          }
+          if (artists && artists.length > 0) {
+            setChartArtists(artists);
+          }
+          setIsLoadingReleases(false);
+        }
+      } catch (err) {
+        console.warn('Erreur chargement chart Deezer:', err);
+        if (active) setIsLoadingReleases(false);
+      }
     }
-    const matched = TRENDING_TRACKS.filter(t => 
-      t.artist.toLowerCase().includes(seedArtist.toLowerCase() || '') ||
-      t.genre === currentTrack?.genre
-    );
-    if (matched.length >= 4) return matched.slice(0, 6);
-    return TRENDING_TRACKS.slice(0, 6);
-  }, [currentTrack, lastPlayedArtist, newReleases]);
 
-  const handleArtistClick = (artistArg) => {
-    const artistName = typeof artistArg === 'string' ? artistArg : artistArg.name;
+    loadDeezerChartData();
+    return () => { active = false; };
+  }, []);
+
+  // Quick Start cards grid for top header (Spotify style 6-grid)
+  const quickStartGrid = useMemo(() => {
+    const cards = [];
+
+    // Card 1: Liked Tracks
+    if (likedTracks && likedTracks.length > 0) {
+      cards.push({
+        id: 'liked-tracks-quick',
+        title: 'Titres likés',
+        subtitle: `${likedTracks.length} morceau${likedTracks.length > 1 ? 's' : ''}`,
+        cover: likedTracks[0]?.thumbnail || DEFAULT_HD_COVER,
+        isGradientCover: true,
+        tracks: likedTracks.map(t => ({
+          videoId: t.video_id || t.videoId,
+          title: t.title,
+          artist: t.artist,
+          thumbnail: t.thumbnail || DEFAULT_HD_COVER,
+          duration: t.duration || 210
+        }))
+      });
+    }
+
+    // Card 2..6: Most recent played unique items
+    const seenIds = new Set();
+    recentPlayedTracks.forEach(track => {
+      const id = track.videoId || track.id;
+      if (id && !seenIds.has(id) && cards.length < 6) {
+        seenIds.add(id);
+        cards.push({
+          id: `quick_${id}`,
+          title: track.title,
+          subtitle: track.artist,
+          cover: track.thumbnail || track.cover || DEFAULT_HD_COVER,
+          track: track
+        });
+      }
+    });
+
+    // Fill remaining with Deezer Chart tracks if user has few history items
+    if (cards.length < 6 && chartTracks.length > 0) {
+      chartTracks.forEach(track => {
+        const id = track.videoId || track.id;
+        if (cards.length < 6 && !seenIds.has(id)) {
+          seenIds.add(id);
+          cards.push({
+            id: `quick_trend_${id}`,
+            title: track.title,
+            subtitle: track.artist,
+            cover: track.cover_big || track.thumbnail || track.cover || DEFAULT_HD_COVER,
+            track: track
+          });
+        }
+      });
+    }
+
+    return cards;
+  }, [likedTracks, recentPlayedTracks, chartTracks]);
+
+  // Fetch Smart Recommendations ("Sélection Exclusive": 8 morceaux d'artistes DIFFÉRENTS)
+  useEffect(() => {
+    let active = true;
+    async function fetchSmartRecommendations() {
+      setIsLoadingRecommendations(true);
+      
+      const mixed8Tracks = [];
+      const usedArtistKeys = new Set();
+
+      // Pool of user history and liked tracks
+      const userTrackPool = [
+        ...(recentPlayedTracks || []),
+        ...(likedTracks || [])
+      ];
+
+      // 1. Pick 1 track per artist from user history/likes
+      for (const track of userTrackPool) {
+        if (!track) continue;
+        const artistName = track.artist || track.artists?.[0]?.name;
+        const artKey = normalizeArtistKey(artistName);
+        if (artKey && !usedArtistKeys.has(artKey)) {
+          usedArtistKeys.add(artKey);
+          mixed8Tracks.push({
+            ...track,
+            artist: getMainArtistName(artistName) || 'Artiste',
+            thumbnail: track.cover_big || track.cover || track.thumbnail || DEFAULT_HD_COVER
+          });
+        }
+        if (mixed8Tracks.length >= 8) break;
+      }
+
+      // 2. If we still need more tracks to reach 8, pick from chartTracks with distinct artists
+      const pool = chartTracks.length > 0 ? chartTracks : [];
+      for (const track of pool) {
+        if (mixed8Tracks.length >= 8) break;
+        const artistName = track.artist;
+        const artKey = normalizeArtistKey(artistName);
+        if (artKey && !usedArtistKeys.has(artKey)) {
+          usedArtistKeys.add(artKey);
+          mixed8Tracks.push({
+            ...track,
+            artist: getMainArtistName(artistName) || 'Artiste',
+            thumbnail: track.cover_big || track.cover || track.thumbnail || DEFAULT_HD_COVER
+          });
+        }
+      }
+
+      if (active) {
+        setRecommendedTracks(mixed8Tracks.slice(0, 8));
+        setIsLoadingRecommendations(false);
+      }
+    }
+
+    fetchSmartRecommendations();
+    return () => { active = false; };
+  }, [recentPlayedTracks, likedTracks, chartTracks]);
+
+  // Personalized Mixes (Daily Mix 1, Daily Mix 2, Radio Artiste)
+  const customMixes = useMemo(() => {
+    const topArtist = seedArtistName || (chartArtists[0]?.name || 'Daft Punk');
+    const firstCover = recommendedTracks[0]?.thumbnail || chartTracks[0]?.thumbnail || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&q=80';
+    const secondCover = recommendedTracks[1]?.thumbnail || chartTracks[1]?.thumbnail || 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&q=80';
+    const thirdCover = likedTracks?.[0]?.thumbnail || chartTracks[2]?.thumbnail || DEFAULT_HD_COVER;
+
+    return [
+      {
+        id: 'mix_daily_1',
+        title: 'Daily Mix 1',
+        description: `Un condensé sur-mesure combinant ${topArtist} et vos artistes récents.`,
+        cover: firstCover,
+        tracks: recommendedTracks.length > 0 ? recommendedTracks : chartTracks.slice(0, 10)
+      },
+      {
+        id: 'mix_radio_artist',
+        title: `Radio ${topArtist}`,
+        description: `Découvrez des titres dans l'esprit de ${topArtist}.`,
+        cover: secondCover,
+        tracks: recommendedTracks.length > 0 ? recommendedTracks.slice().reverse() : chartTracks.slice(10, 20)
+      },
+      {
+        id: 'mix_chill_hits',
+        title: 'Mix Coup de Cœur',
+        description: 'Morceaux coups de cœur et pépites tendance pour vous.',
+        cover: thirdCover,
+        tracks: likedTracks && likedTracks.length > 0 ? likedTracks : chartTracks.slice(0, 12)
+      }
+    ];
+  }, [seedArtistName, recommendedTracks, likedTracks, chartTracks, chartArtists]);
+
+  // Click on artist card
+  const handleArtistClick = (artistName) => {
     const main = getMainArtistName(artistName);
-    const artistObj = FEATURED_ARTISTS.find(a => a.name.toLowerCase() === main.toLowerCase()) || {
-      name: main,
-      avatar: '',
-      genre: 'Artiste'
-    };
-    const artistTracks = TRENDING_TRACKS.filter(t => isArtistMatch(t.artist, main)).length > 0
-      ? TRENDING_TRACKS.filter(t => isArtistMatch(t.artist, main))
-      : FRESH_NEW_RELEASES.slice(0, 6);
-
-    setSelectedPlaylist({
-      title: artistObj.name,
-      cover: artistObj.avatar || artistTracks[0]?.thumbnail || '',
-      description: `Discographie et plus grands succès de ${artistObj.name} (${artistObj.genre || 'Musique'})`,
-      era: artistObj.genre || 'Sélection',
-      tracks: artistTracks
-    });
+    navigate(`/artist/${encodeURIComponent(main)}`);
   };
 
-  const handleOpenItemAsPlaylist = (item, type) => {
-    const itemTracks = (item.tracks && item.tracks.length > 0)
-      ? item.tracks
-      : [item, ...TRENDING_TRACKS.filter(t => t.videoId !== item.videoId && (t.artist === item.artist || t.genre === item.genre)).slice(0, 8)];
-
-    setSelectedPlaylist({
-      title: item.title,
-      cover: item.thumbnail,
-      description: `${type || item.type || 'Nouveauté'} • ${item.artist || 'Artiste'} (${item.year || '2024'})`,
-      era: item.year || item.genre || 'Sélection',
-      tracks: itemTracks
-    });
-  };
-
-  const handlePlayRelease = (release) => {
+  // Play release / album
+  const handlePlayRelease = async (release) => {
     if (release.tracks && release.tracks.length > 0) {
-      if (currentTrack?.videoId === release.tracks[0].videoId) {
+      if (isCurrentTrack(release.tracks[0])) {
         togglePlayPause();
       } else {
         setQueueAndPlay(release.tracks, 0);
       }
-    } else {
-      if (currentTrack?.videoId === release.videoId) {
-        togglePlayPause();
-      } else {
-        play(release);
+      return;
+    }
+
+    // Si c'est un album Deezer, récupérer sa tracklist
+    if (release.deezerId || release.id) {
+      try {
+        const albumTracks = await getAlbumTracksDeezer(release.deezerId || release.id, release.artist, release);
+        if (albumTracks && albumTracks.length > 0) {
+          setQueueAndPlay(albumTracks, 0);
+          return;
+        }
+      } catch (err) {
+        console.warn('Erreur lecture tracks album:', err);
       }
+    }
+
+    const coverUrl = release.cover_big || release.cover_xl || release.cover_medium || release.cover || DEFAULT_HD_COVER;
+    const trackObj = {
+      id: `dz_${release.id || release.deezerId}`,
+      deezerId: release.id || release.deezerId,
+      videoId: `dz_${release.id || release.deezerId}`,
+      title: release.title,
+      artist: release.artist,
+      album: release.title,
+      albumId: release.id || release.deezerId,
+      thumbnail: coverUrl,
+      source: 'deezer'
+    };
+
+    if (isCurrentTrack(trackObj)) {
+      togglePlayPause();
+    } else {
+      play(trackObj);
     }
   };
 
-  const handleOpenPlaylist = (playlist) => {
-    setSelectedPlaylist(playlist);
-  };
-
   return (
-    <div className="w-full max-w-6xl mx-auto px-6 py-4 flex flex-col gap-10 box-border pb-32 fade-in">
+    <div className="w-full max-w-7xl mx-auto px-4 md:px-8 py-6 flex flex-col gap-10 box-border pb-32 fade-in bg-[var(--color-theme-bg)] text-white select-none">
       
-      {/* Header */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between py-4 border-b border-white/10 gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-full bg-[var(--color-theme-accent)] border border-[var(--color-sand)] flex items-center justify-center text-[var(--color-brass)] shadow-lg">
-            <Disc size={22} className={isPlaying ? "animate-spin-slow" : ""} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl md:text-3xl font-black text-white tracking-tighter leading-none uppercase">
-                Le Salon E-GE
-              </h1>
-              {user?.is_guest && (
-                <span className="px-2.5 py-0.5 rounded-full text-[9px] font-mono font-black uppercase tracking-wider bg-[#c29e5a]/20 text-[#e1bb72] border border-[#c29e5a]/40 flex items-center gap-1">
-                  <Sparkles size={10} />
-                  <span>Mode Invité Actif</span>
-                </span>
-              )}
-            </div>
-            <span className="text-[10px] text-gray-400 font-bold block mt-1 uppercase tracking-widest">
-              Recommandations Personnalisées, Platine 3D & Playlists
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/search')}
-            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white border border-white/15 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm cursor-pointer"
-          >
-            <Search size={14} style={{ color: currentTheme.primary }} />
-            <span>Recherche globale & Top 50...</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 3D VINYL PLAYER BANNER */}
-      <div 
-        onClick={() => navigate('/player')}
-        className="relative overflow-hidden rounded-3xl border border-white/[0.08] p-6 sm:p-8 flex flex-col md:flex-row items-center justify-between gap-6 hover:border-white/20 transition-all duration-300 cursor-pointer shadow-[0_20px_40px_rgba(0,0,0,0.6)] group"
-        style={{ backgroundColor: currentTheme.cardBg }}
-      >
-        <div 
-          className="absolute -right-12 -top-12 w-48 h-48 rounded-full blur-3xl transition-all duration-500" 
-          style={{ backgroundColor: `${currentTheme.primary}20` }}
-        />
-        
-        <div className="flex flex-col sm:flex-row items-center gap-5 text-center sm:text-left z-10">
-          <div 
-            className="w-16 h-16 rounded-2xl bg-black/50 border border-white/10 flex items-center justify-center shadow-inner group-hover:scale-105 transition-transform duration-500 shrink-0 relative overflow-hidden"
-            style={{ color: currentTheme.primary }}
-          >
-            <Disc size={34} className="animate-spin-slow relative z-10" style={{ color: currentTheme.primary }} />
-            <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent opacity-60" />
-          </div>
-          
-          <div className="space-y-1">
-            <span 
-              className="text-[9px] font-black uppercase tracking-[0.25em] border px-3 py-1 rounded-full inline-block font-mono"
-              style={{ backgroundColor: currentTheme.bgAccent, color: currentTheme.primary, borderColor: `${currentTheme.primary}40` }}
-            >
-              Expérience Audiophile
-            </span>
-            <h2 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight">
-              Platine Vinyle Interactive 3D
-            </h2>
-            <p className="text-xs text-gray-400 max-w-md leading-relaxed font-medium">
-              Manipulez physiquement le saphir, ajustez le pitch et ressentez le grain des plus grands classiques.
-            </p>
-          </div>
+      {/* 1. Header Greeting & Quick Search */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-3">
+            <span>{greeting}</span>
+            {user?.email && (
+              <span className="text-xs font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1 rounded-full">
+                En ligne
+              </span>
+            )}
+          </h1>
+          <p className="text-xs text-gray-400 mt-1 font-medium">
+            Recommandations personnalisées selon vos habitudes d'écoute
+          </p>
         </div>
 
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            navigate('/player');
-          }}
-          className="px-6 py-3.5 text-black font-black uppercase tracking-widest text-xs rounded-xl hover:scale-[1.03] active:scale-[0.97] transition-all flex items-center gap-2 shadow-lg shrink-0 cursor-pointer z-10"
-          style={{ backgroundColor: currentTheme.primary }}
+          onClick={() => navigate('/search')}
+          className="flex items-center gap-2.5 bg-white/10 hover:bg-white/20 text-white border border-white/10 px-5 py-2.5 rounded-full text-xs font-bold transition-all shadow-md cursor-pointer hover:scale-105 active:scale-95"
         >
-          <Play size={12} fill="currentColor" className="stroke-none" />
-          <span>Ouvrir la Platine</span>
+          <Search size={16} className="text-emerald-400" />
+          <span>Rechercher un titre ou un artiste</span>
         </button>
       </div>
 
-      {/* SECTION : RECOMMANDATIONS DYNAMIQUES D'ÉCOUTE & MIX QUOTIDIEN */}
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-base sm:text-lg font-black text-white uppercase tracking-tight flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: currentTheme.primary }} />
-              <Sparkles size={20} style={{ color: currentTheme.primary }} />
-              <span>Pour vous & Mix Quotidien</span>
-            </h2>
-            <p className="text-xs text-gray-400 font-medium mt-0.5">
-              Généré automatiquement selon vos écoutes et votre profil musical
-            </p>
-          </div>
-        </div>
+      {/* 2. Quick Start Grid (Spotify 6-card grid top of home) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {quickStartGrid.map((item) => {
+          const isThisPlaying = ((item.track && isCurrentTrack(item.track)) ||
+                                (item.tracks && isCurrentTrack(item.tracks[0]))) && isPlaying;
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Mix Quotidien Card */}
-          <div 
-            onClick={() => handleOpenPlaylist(dailyMixPlaylist)}
-            className="lg:col-span-1 bg-gradient-to-br from-[#1DB954]/20 via-[#121110] to-black border border-[#1DB954]/30 rounded-3xl p-6 flex flex-col justify-between shadow-2xl hover:border-[#1DB954] transition-all duration-300 cursor-pointer group relative overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-[#1DB954]/10 rounded-full blur-2xl group-hover:bg-[#1DB954]/20 transition-all" />
+          const handleQuickPlay = (e) => {
+            e.stopPropagation();
+            if (item.tracks) {
+              setQueueAndPlay(item.tracks, 0);
+            } else if (item.track) {
+              play(item.track);
+            }
+          };
 
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full bg-[#1DB954] text-black font-mono shadow-md">
-                  Recommandé aujourd'hui
-                </span>
-                <Sparkles size={18} className="text-[#1DB954]" />
-              </div>
-
-              <div className="relative aspect-video w-full rounded-2xl overflow-hidden mb-4 border border-white/10 bg-black/40">
-                <img src={dailyMixPlaylist.cover} alt="Mix Quotidien" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setQueueAndPlay(dailyMixPlaylist.tracks, 0);
-                  }}
-                  className="absolute bottom-3 right-3 w-12 h-12 rounded-full bg-[#1DB954] text-black flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all cursor-pointer"
-                >
-                  <Play size={20} fill="currentColor" className="ml-0.5 stroke-none" />
-                </button>
-              </div>
-
-              <h3 className="text-lg font-black text-white uppercase tracking-tight group-hover:text-[#1DB954] transition-colors">
-                {dailyMixPlaylist.title}
-              </h3>
-              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                {dailyMixPlaylist.description}
-              </p>
-            </div>
-
-            <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/10 text-xs text-gray-400 font-mono">
-              <span>{dailyMixPlaylist.tracks.length} titres recommandés</span>
-              <span className="text-[#1DB954] font-bold flex items-center gap-1">
-                <span>Écouter</span>
-                <ChevronRight size={14} />
-              </span>
-            </div>
-          </div>
-
-          {/* Grid "Inspiré par vos écoutes" */}
-          <div className="lg:col-span-2 space-y-3">
-            <h3 className="text-xs font-black uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-2">
-              <Clock size={14} className="text-[#1DB954]" />
-              <span>Inspiré par vos écoutes ({smartRecommendations.length} morceaux)</span>
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {smartRecommendations.map((track, idx) => (
-                <div
-                  key={`smart-${track.videoId}-${idx}`}
-                  onClick={() => handleOpenItemAsPlaylist(track, 'Recommandation')}
-                  className="bg-[#121110] hover:bg-white/[0.06] border border-white/10 p-3 rounded-2xl cursor-pointer group transition-all duration-200 flex items-center justify-between gap-3 shadow-md"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 shadow-sm bg-black/40 border border-white/10">
-                      <TrackImage src={track.thumbnail} alt={track.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-200">
-                        <Play size={14} fill="currentColor" className="text-white ml-0.5" />
-                      </div>
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-white truncate group-hover:text-[#1DB954] transition-colors uppercase tracking-tight">
-                        {track.title}
-                      </p>
-                      <p 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleArtistClick(track.artist);
-                        }}
-                        className="text-[11px] text-gray-400 truncate hover:text-[#1DB954] mt-0.5 font-medium transition-colors"
-                      >
-                        {track.artist}
-                      </p>
-                    </div>
+          return (
+            <div
+              key={item.id}
+              onClick={() => {
+                if (item.tracks) {
+                  setSelectedPlaylist({
+                    title: item.title,
+                    description: item.subtitle,
+                    cover: item.cover,
+                    tracks: item.tracks
+                  });
+                } else if (item.track) {
+                  play(item.track);
+                }
+              }}
+              className="bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/20 rounded-xl p-2.5 flex items-center justify-between gap-3 transition-all duration-200 cursor-pointer group shadow-sm relative overflow-hidden"
+            >
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                {item.isGradientCover ? (
+                  <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-indigo-600 via-purple-600 to-emerald-500 flex items-center justify-center shrink-0 shadow-md">
+                    <Heart size={24} fill="currentColor" className="text-white" />
                   </div>
-
-                  <div className="flex items-center gap-1 shrink-0">
-                    {user && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleLike(track);
-                        }}
-                        className="p-1.5 transition-transform hover:scale-110 cursor-pointer"
-                        title={isLiked(track) ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-                      >
-                        <Heart size={14} className={isLiked(track) ? 'text-red-500 fill-red-500' : 'text-gray-500 hover:text-white'} />
-                      </button>
-                    )}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedTrackForPlaylist(track);
-                      }}
-                      className="p-1.5 text-gray-400 hover:text-[#1DB954] rounded transition-transform hover:scale-110 cursor-pointer"
-                      title="Ajouter à une playlist"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
+                ) : (
+                  <img 
+                    src={item.cover} 
+                    alt={item.title} 
+                    className="w-14 h-14 rounded-lg object-cover shrink-0 border border-white/10 shadow-sm"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = DEFAULT_HD_COVER;
+                    }}
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-bold text-white truncate group-hover:text-emerald-400 transition-colors">
+                    {item.title}
+                  </h3>
+                  <p className="text-xs text-gray-400 truncate mt-0.5 font-medium">
+                    {item.subtitle}
+                  </p>
                 </div>
-              ))}
+              </div>
+
+              {/* Green Spotify Play Button on Hover */}
+              <button
+                onClick={handleQuickPlay}
+                className={`w-10 h-10 rounded-full bg-emerald-500 text-black flex items-center justify-center shadow-lg transition-all duration-200 cursor-pointer ${
+                  isThisPlaying ? 'opacity-100 scale-100' : 'opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100'
+                } hover:bg-emerald-400 hover:scale-110 active:scale-95 shrink-0`}
+              >
+                {isThisPlaying ? (
+                  <Pause size={18} fill="currentColor" className="stroke-none" />
+                ) : (
+                  <Play size={18} fill="currentColor" className="ml-0.5 stroke-none" />
+                )}
+              </button>
             </div>
-          </div>
-        </div>
+          );
+        })}
       </div>
 
-      {/* SECTION : NOUVEAUTÉS & SORTIES RÉCENTES (VRAIES SORTIES SPOTIFY HD) */}
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-white/10 gap-3">
+      {/* 3. Section: "Sélection Exclusive" */}
+      <div className="space-y-4 pt-2">
+        <div className="flex items-center justify-between pb-2 border-b border-white/5">
           <div>
-            <h2 className="text-base sm:text-lg font-black text-white uppercase tracking-tight flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#1DB954] shadow-[0_0_10px_#1DB954]" />
-              <Flame size={20} className="text-[#1DB954]" />
-              <span>Nouveautés & Sorties Récentes</span>
+            <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight flex items-center gap-2.5">
+              <Sparkles size={20} className="text-emerald-400" />
+              <span>Sélection Exclusive</span>
             </h2>
             <p className="text-xs text-gray-400 font-medium mt-0.5">
-              Les derniers albums et singles officiels sortis cette semaine sur Spotify
+              Une sélection mixte de 8 morceaux d'artistes différents issus de vos écoutes et du Top Deezer
             </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {isLoadingReleases && (
-              <span className="text-xs text-gray-400 font-mono flex items-center gap-1.5 animate-pulse">
-                <RefreshCw size={12} className="animate-spin text-[#1DB954]" />
-                Mise à jour...
-              </span>
-            )}
-            <button
-              onClick={() => {
-                const allTracks = newReleases.flatMap(r => r.tracks || [r]);
-                setQueueAndPlay(allTracks, 0);
-              }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1DB954] hover:bg-[#1ed760] active:scale-95 text-black text-xs uppercase tracking-wider font-black transition-all shadow-md cursor-pointer"
-            >
-              <Play size={12} fill="currentColor" className="stroke-none" />
-              <span>Tout lire</span>
-            </button>
           </div>
         </div>
 
-        {/* CARTES ET VISUELS HD STYLE SPOTIFY */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-4">
-          {newReleases.map((item, idx) => {
-            const isThisPlaying = (currentTrack?.videoId === item.videoId || (item.tracks && item.tracks.some(t => t.videoId === currentTrack?.videoId))) && isPlaying;
-
-            return (
-              <div
-                key={`new-release-${item.videoId || idx}`}
-                onClick={() => handleOpenItemAsPlaylist(item, item.type || 'Album')}
-                className="bg-[#121110] hover:bg-white/[0.08] border border-white/10 rounded-xl p-3.5 cursor-pointer group transition-all duration-300 flex flex-col justify-between shadow-xl relative"
-              >
-                <div>
-                  {/* Image carrée avec coins légèrement arrondis (rounded-md) */}
-                  <div className="relative aspect-square w-full rounded-md overflow-hidden mb-3 bg-black/40 border border-white/10 shadow-md">
-                    <TrackImage 
-                      src={item.thumbnail} 
-                      alt={item.title} 
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+        {/* Grid of 8 Recommended Tracks from 8 Different Artists */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-4">
+          {isLoadingRecommendations ? (
+            Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="bg-white/5 rounded-2xl p-3 animate-pulse space-y-3">
+                <div className="aspect-square bg-white/10 rounded-xl" />
+                <div className="h-4 bg-white/10 rounded w-3/4" />
+                <div className="h-3 bg-white/10 rounded w-1/2" />
+              </div>
+            ))
+          ) : (
+            recommendedTracks.slice(0, 8).map((track, idx) => {
+              const isThisPlaying = isCurrentTrack(track) && isPlaying;
+              const coverUrl = track.cover_big || track.cover || track.thumbnail || DEFAULT_HD_COVER;
+              return (
+                <div
+                  key={`rec_track_${track.videoId || track.id || idx}`}
+                  onClick={() => play(track)}
+                  className="bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/15 p-3 rounded-2xl cursor-pointer group transition-all duration-300 flex flex-col justify-between shadow-sm relative"
+                >
+                  <div className="relative aspect-square w-full rounded-xl overflow-hidden mb-3 border border-white/10 shadow-md">
+                    <img 
+                      src={coverUrl} 
+                      alt={track.title} 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = DEFAULT_HD_COVER;
+                      }}
                     />
-
-                    {/* Badge type de sortie (Album / Single) */}
-                    <div className="absolute top-2 left-2 z-10">
-                      <span className="text-[9px] font-black tracking-widest px-2 py-0.5 rounded-md bg-black/85 text-[#1DB954] shadow-md border border-[#1DB954]/30 font-mono uppercase">
-                        {item.type || 'Album'}
-                      </span>
-                    </div>
-
-                    {/* Bouton "Play" vert/cyan néon en superposition au survol */}
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-300">
+                    
+                    {/* Play Overlay Button */}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-end justify-end p-2.5">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handlePlayRelease(item);
+                          play(track);
                         }}
-                        className="w-12 h-12 rounded-full bg-[#1DB954] text-black shadow-2xl flex items-center justify-center transform translate-y-2 group-hover:translate-y-0 transition-all duration-300 hover:scale-110 active:scale-95 cursor-pointer"
-                        title={`Écouter ${item.title}`}
+                        className="w-11 h-11 rounded-full bg-emerald-500 text-black flex items-center justify-center shadow-xl hover:bg-emerald-400 hover:scale-110 active:scale-95 transition-all cursor-pointer"
                       >
                         {isThisPlaying ? (
                           <Pause size={20} fill="currentColor" className="stroke-none" />
@@ -498,214 +483,203 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  {/* Titre du projet / Morceau en gras */}
-                  <h3 className="text-white font-bold text-xs sm:text-sm truncate group-hover:text-[#1DB954] transition-colors tracking-tight">
-                    {item.title}
-                  </h3>
-
-                  {/* Nom de l'artiste + mention "Album" ou "Single" */}
-                  <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 font-medium truncate">
-                    <span 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleArtistClick(item.artist);
-                      }}
-                      className="hover:text-[#1DB954] transition-colors truncate"
-                    >
-                      {item.artist}
-                    </span>
-                    <span className="text-gray-600 font-bold">•</span>
-                    <span className="text-[10px] text-gray-400 font-mono font-semibold uppercase shrink-0">
-                      {item.type || 'Album'}
-                    </span>
+                  <div>
+                    <h3 className="font-bold text-sm text-white truncate group-hover:text-emerald-400 transition-colors">
+                      {track.title}
+                    </h3>
+                    <p className="text-xs text-gray-400 truncate mt-0.5 font-medium">
+                      {track.artist}
+                    </p>
                   </div>
                 </div>
-
-                {/* Information de bas de carte : Genre / Actions favoris & playlist */}
-                <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-white/5 text-xs text-gray-500">
-                  <span className="font-mono text-[10px] uppercase text-[#1DB954] font-semibold truncate max-w-[100px]">
-                    {item.genre || 'Nouveauté'}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    {user && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleLike(item);
-                        }}
-                        className="p-1.5 transition-all hover:scale-110 active:scale-95 cursor-pointer"
-                        title={isLiked(item) ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-                      >
-                        <Heart size={14} className={isLiked(item) ? 'text-red-500 fill-red-500' : 'text-gray-400 hover:text-white'} />
-                      </button>
-                    )}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedTrackForPlaylist(item);
-                      }}
-                      className="p-1.5 text-gray-400 hover:text-[#1DB954] rounded transition-all hover:scale-110 cursor-pointer"
-                      title="Ajouter à une playlist"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </div>
 
-      {/* SECTION : PAR GENRES & AMBIANCE (SPOTIFY COLORFUL CARDS) */}
-      <div className="space-y-4">
-        <div className="pb-2 border-b border-white/10">
-          <h2 className="text-base sm:text-lg font-black text-white uppercase tracking-tight flex items-center gap-2.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#1DB954]" />
-            <Layers size={20} className="text-[#1DB954]" />
-            <span>Par Genres & Ambiances</span>
+      {/* 4. Section: "Mixes créés pour vous" */}
+      <div className="space-y-4 pt-2">
+        <div className="pb-2 border-b border-white/5">
+          <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight flex items-center gap-2.5">
+            <Radio size={20} className="text-purple-400" />
+            <span>Mixes créés pour vous</span>
           </h2>
           <p className="text-xs text-gray-400 font-medium mt-0.5">
-            Explorez la musique par style, de la Pop au Rap en passant par l'Electro et le Rock
+            Compilations générées automatiquement selon vos styles préférés
           </p>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-          {GENRE_PLAYLISTS.map((genre) => (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {customMixes.map((mix) => (
             <div
-              key={genre.id}
-              onClick={() => handleOpenPlaylist(genre)}
-              className={`bg-gradient-to-br ${genre.color} rounded-2xl p-4 h-36 flex flex-col justify-between cursor-pointer group transition-all duration-300 hover:scale-[1.03] shadow-xl relative overflow-hidden border border-white/10`}
+              key={mix.id}
+              onClick={() => setSelectedPlaylist(mix)}
+              className="bg-white/5 hover:bg-white/10 border border-white/5 hover:border-purple-500/30 p-4 rounded-2xl cursor-pointer group transition-all duration-300 flex flex-col justify-between shadow-md"
             >
-              <div className="z-10">
-                <span className="text-[10px] font-black uppercase tracking-widest text-white/80 font-mono">
-                  Genre
-                </span>
-                <h3 className="text-sm font-black text-white uppercase tracking-tight mt-0.5">
-                  {genre.title}
-                </h3>
-              </div>
-
-              <div className="relative z-10 flex items-center justify-between text-[10px] font-mono text-white/90 font-bold">
-                <span>{genre.tracks.length} titres</span>
-                <div className="w-7 h-7 rounded-full bg-white/20 backdrop-blur-md text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md">
-                  <Play size={12} fill="currentColor" className="ml-0.5" />
-                </div>
-              </div>
-
-              {/* Decorative graphic background */}
-              <img 
-                src={genre.cover} 
-                alt={genre.title} 
-                className="absolute -right-4 -bottom-4 w-24 h-24 rounded-xl object-cover opacity-40 rotate-12 group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 pointer-events-none shadow-2xl" 
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* SECTION : PLAYLISTS PAR ÉPOQUE & DÉCENNIES */}
-      <div className="space-y-4">
-        <div className="pb-2 border-b border-white/10">
-          <h2 className="text-base sm:text-lg font-black text-white uppercase tracking-tight flex items-center gap-2.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#1DB954]" />
-            <Music2 size={20} className="text-[#1DB954]" />
-            <span>Playlists par Époque & Décennies</span>
-          </h2>
-          <p className="text-xs text-gray-400 font-medium mt-0.5">
-            Revivez les grandes époques de la musique des années 70 à 2020
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {DECADE_PLAYLISTS.map((playlist) => (
-            <div
-              key={playlist.id}
-              onClick={() => handleOpenPlaylist(playlist)}
-              className="bg-[#121110] hover:bg-white/[0.06] border border-white/10 rounded-2xl overflow-hidden cursor-pointer group transition-all duration-300 flex flex-col justify-between shadow-xl"
-            >
-              <div className="relative h-44 w-full overflow-hidden bg-black/40 border-b border-white/10">
-                <img src={playlist.cover} alt={playlist.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#121110] via-black/20 to-transparent" />
-                
-                <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
-                  <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded bg-black/80 text-[#1DB954] shadow-md border border-[#1DB954]/30 font-mono">
-                    Époque {playlist.era}
-                  </span>
-                  <button 
+              <div>
+                <div className="relative aspect-video w-full rounded-xl overflow-hidden mb-3.5 border border-white/10 shadow-lg">
+                  <img 
+                    src={mix.cover} 
+                    alt={mix.title} 
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = DEFAULT_HD_COVER;
+                    }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                  
+                  <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setQueueAndPlay(playlist.tracks, 0);
+                      setQueueAndPlay(mix.tracks, 0);
                     }}
-                    className="w-11 h-11 rounded-full bg-[#1DB954] text-black flex items-center justify-center shadow-xl transform translate-y-2 opacity-0 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 cursor-pointer hover:scale-110"
-                    title="Lecture rapide"
+                    className="absolute bottom-3 right-3 w-10 h-10 rounded-full bg-emerald-500 text-black flex items-center justify-center shadow-2xl opacity-0 group-hover:opacity-100 hover:scale-110 active:scale-95 transition-all cursor-pointer"
                   >
                     <Play size={18} fill="currentColor" className="ml-0.5 stroke-none" />
                   </button>
                 </div>
+
+                <h3 className="font-bold text-base text-white group-hover:text-purple-400 transition-colors">
+                  {mix.title}
+                </h3>
+                <p className="text-xs text-gray-400 mt-1 leading-relaxed line-clamp-2">
+                  {mix.description}
+                </p>
               </div>
 
-              <div className="p-4 flex-1 flex flex-col justify-between">
-                <div>
-                  <h3 className="font-bold text-white text-sm uppercase tracking-tight group-hover:text-[#1DB954] transition-colors">
-                    {playlist.title}
-                  </h3>
-                  <p className="text-xs text-gray-400 mt-1 line-clamp-2 leading-relaxed">
-                    {playlist.description}
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/5 text-xs font-mono text-gray-500 uppercase tracking-wider">
-                  <span>{playlist.tracks.length} morceaux culte</span>
-                  <span className="text-[#1DB954] font-bold flex items-center gap-1">
-                    <span>Ouvrir</span>
-                    <ChevronRight size={14} />
-                  </span>
-                </div>
+              <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-gray-400 font-medium">
+                <span>{mix.tracks.length} titres</span>
+                <span className="text-purple-400 font-bold group-hover:underline">Écouter</span>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* SECTION : ARTISTES PHARES & LÉGENDES */}
-      <div className="space-y-4">
-        <div className="pb-2 border-b border-white/10">
-          <h2 className="text-base sm:text-lg font-black text-white uppercase tracking-tight flex items-center gap-2.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#1DB954]" />
-            <span>Artistes Phares & Légendes</span>
-          </h2>
-          <p className="text-xs text-gray-400 font-medium mt-0.5">
-            Accédez aux discographies complètes et titres incontournables
-          </p>
+      {/* 5. Section: "Découvertes du moment" (Albums & Singles Officiels Deezer Chart) */}
+      <div className="space-y-4 pt-2">
+        <div className="flex items-center justify-between pb-2 border-b border-white/5">
+          <div>
+            <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight flex items-center gap-2.5">
+              <Flame size={20} className="text-amber-400" />
+              <span>Découvertes du moment</span>
+            </h2>
+            <p className="text-xs text-gray-400 font-medium mt-0.5">
+              Les albums et singles officiels les plus populaires du moment sur Deezer
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {FEATURED_ARTISTS.map((artist) => (
-            <div
-              key={artist.name}
-              onClick={() => handleArtistClick(artist)}
-              className="bg-[#121110] hover:bg-white/[0.06] border border-white/10 p-4 rounded-2xl cursor-pointer group transition-all duration-300 flex flex-col items-center text-center shadow-lg"
-            >
-              <div className="relative w-18 h-18 rounded-full overflow-hidden mb-3 border-2 border-white/10 group-hover:border-[#1DB954] transition-all duration-300 shadow-md">
-                <ArtistAvatar 
-                  artistName={artist.name} 
-                  fallbackSrc={artist.avatar} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                />
+          {isLoadingReleases ? (
+            Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="bg-white/5 rounded-2xl p-3 animate-pulse space-y-3">
+                <div className="aspect-square bg-white/10 rounded-xl" />
+                <div className="h-4 bg-white/10 rounded w-3/4" />
+                <div className="h-3 bg-white/10 rounded w-1/2" />
               </div>
+            ))
+          ) : (
+            newReleases.map((item, idx) => {
+              // Extraction prioritaire de la pochette officielle Deezer HD
+              const imageUrl = item?.cover_big || 
+                               item?.cover_xl || 
+                               item?.cover_medium || 
+                               item?.cover || 
+                               item?.album?.cover_big || 
+                               item?.album?.cover_medium || 
+                               DEFAULT_HD_COVER;
 
-              <span className="text-[9px] uppercase font-black text-[#1DB954] font-mono tracking-widest truncate w-full">
-                {artist.genre}
-              </span>
-              <h3 className="text-xs font-bold text-white group-hover:text-[#1DB954] transition-colors mt-1 truncate w-full uppercase tracking-tight">
+              const artistName = item.artist?.name || item.artist || 'Artiste';
+
+              return (
+                <div 
+                  key={item.deezerId || item.id || idx} 
+                  onClick={() => handleArtistClick(artistName)} 
+                  className="bg-white/5 hover:bg-white/10 border border-white/5 hover:border-amber-500/30 p-3 rounded-2xl cursor-pointer group transition-all duration-300 flex flex-col justify-between shadow-sm relative"
+                >
+                  <div className="relative aspect-square w-full rounded-xl overflow-hidden mb-3.5 border border-white/10 shadow-md">
+                    <img 
+                      src={imageUrl} 
+                      alt={item.title || 'Album'} 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = DEFAULT_HD_COVER;
+                      }}
+                    />
+                    {item.type && (
+                      <span className="absolute top-2 left-2 bg-black/70 backdrop-blur-md text-[9px] font-black uppercase tracking-wider text-amber-300 px-2 py-0.5 rounded-full border border-white/10">
+                        {item.type}
+                      </span>
+                    )}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-end justify-end p-2.5">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePlayRelease(item);
+                        }}
+                        className="w-10 h-10 rounded-full bg-emerald-500 text-black flex items-center justify-center shadow-xl hover:bg-emerald-400 hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                        title="Écouter l'album"
+                      >
+                        <Play size={18} fill="currentColor" className="ml-0.5 stroke-none" />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="font-bold text-white truncate group-hover:text-amber-300 transition-colors">{item.title}</p>
+                  <p className="text-xs text-zinc-400 truncate mt-0.5">{artistName}</p>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* 6. Section: "Artistes suggérés pour vous" */}
+      <div className="space-y-4 pt-2">
+        <div className="pb-2 border-b border-white/5">
+          <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight flex items-center gap-2.5">
+            <UserCheck size={20} className="text-indigo-400" />
+            <span>Artistes recommandés selon vos goûts</span>
+          </h2>
+        </div>
+
+        <div className="flex items-center gap-5 overflow-x-auto pb-4 scrollbar-hide">
+          {(chartArtists.length > 0 ? chartArtists : FEATURED_ARTISTS).slice(0, 12).map((artist) => (
+            <div
+              key={artist.deezerId || artist.name}
+              onClick={() => handleArtistClick(artist.name)}
+              className="cursor-pointer group flex flex-col items-center text-center shrink-0 w-32 sm:w-36 transition-all duration-200 hover:scale-105"
+            >
+              <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden mb-3 border-2 border-white/10 group-hover:border-emerald-400 transition-all duration-300 shadow-xl">
+                {artist.avatar || artist.picture_big ? (
+                  <img 
+                    src={artist.avatar || artist.picture_big} 
+                    alt={artist.name} 
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = DEFAULT_HD_COVER;
+                    }}
+                  />
+                ) : (
+                  <ArtistAvatar artistName={artist.name} fallbackSrc={artist.avatar} className="w-full h-full object-cover" />
+                )}
+              </div>
+              <h3 className="text-xs sm:text-sm font-bold text-white group-hover:text-emerald-400 truncate w-full tracking-tight">
                 {artist.name}
               </h3>
+              <span className="text-[10px] text-gray-400 font-medium uppercase mt-0.5">
+                Artiste
+              </span>
             </div>
           ))}
         </div>
       </div>
 
+      {/* Modals */}
       <AddToPlaylistModal
         track={selectedTrackForPlaylist}
         isOpen={!!selectedTrackForPlaylist}
@@ -721,3 +695,5 @@ export default function HomePage() {
     </div>
   );
 }
+
+

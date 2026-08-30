@@ -103,14 +103,24 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
         toast.success("Heureux de vous revoir sur E-GE Vinyl !");
         if (onLoginSuccess) onLoginSuccess();
       } else {
-        const { data, error } = await signUp(email, password);
+        const finalFullName = (fullName && fullName.trim()) ? fullName.trim() : ((username && username.trim()) ? username.trim() : email.split('@')[0]);
+        const finalUsername = (username && username.trim()) ? username.trim().replace('@', '') : email.split('@')[0];
+        const finalAvatar = selectedAvatar || PRESET_AVATARS[0].url;
+
+        const { data, error } = await signUp(email, password, {
+          full_name: finalFullName,
+          displayName: finalFullName,
+          username: finalUsername,
+          avatar_url: finalAvatar
+        });
+
         if (error) {
-          // In case of Supabase signup error, activate local session
+          // In case of Supabase signup error, activate local session with user's inputted details
           signInAsGuest(
             email,
-            username || email.split('@')[0],
-            fullName || username || email.split('@')[0],
-            selectedAvatar
+            finalUsername,
+            finalFullName,
+            finalAvatar
           );
           toast.success("Votre compte a été configuré avec succès ! Bienvenue.");
           if (onLoginSuccess) onLoginSuccess();
@@ -120,9 +130,9 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
         if (data?.user) {
           try {
             await updateProfile({
-              full_name: fullName || username || email.split('@')[0],
-              username: username || email.split('@')[0],
-              avatar_url: selectedAvatar
+              full_name: finalFullName,
+              username: finalUsername,
+              avatar_url: finalAvatar
             });
           } catch (_) {}
         }
@@ -132,9 +142,9 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
         if (data?.user && !data?.session) {
           signInAsGuest(
             email,
-            username || email.split('@')[0],
-            fullName || username || email.split('@')[0],
-            selectedAvatar
+            finalUsername,
+            finalFullName,
+            finalAvatar
           );
         }
 
@@ -389,6 +399,21 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
                     </div>
                   </div>
 
+                  {/* Nom complet / Affichage */}
+                  <div className="space-y-1">
+                    <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Nom d'affichage (Nom complet)</span>
+                    <div className="relative group">
+                      <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-[#c29e5a] transition-colors" />
+                      <input
+                        type="text"
+                        placeholder="Alexandre Martin"
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg bg-black/40 border border-white/[0.05] text-white placeholder-gray-600 focus:outline-none focus:border-[#c29e5a] transition-all font-medium"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
                   {/* Username Field */}
                   <div className="space-y-1">
                     <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Votre nom d'utilisateur (@handle)</span>
@@ -401,8 +426,9 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
                         className="w-full pl-7 pr-3 py-2 text-xs rounded-lg bg-black/40 border border-white/[0.05] text-white placeholder-gray-600 focus:outline-none focus:border-[#c29e5a] transition-all font-medium"
                         value={username}
                         onChange={(e) => {
-                          setUsername(e.target.value);
-                          if (!fullName) setFullName(e.target.value);
+                          const val = e.target.value.replace('@', '');
+                          setUsername(val);
+                          if (!fullName) setFullName(val);
                         }}
                       />
                     </div>

@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 /**
  * Image de secours haute définition générique pour la musique
  */
-export const DEFAULT_MUSIC_COVER = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&auto=format&fit=crop&q=80';
+export const DEFAULT_MUSIC_COVER = 'https://e-cdns-images.dzcdn.net/images/cover/03f273295988e0b6732f7a942512f5a0/1000x1000-000000-80-0-0.jpg';
 
 /**
  * Hook ou helper pour obtenir une cascade de URLs pour les miniatures YouTube

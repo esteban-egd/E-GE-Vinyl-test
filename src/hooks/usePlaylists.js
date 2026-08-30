@@ -32,6 +32,13 @@ export function usePlaylists() {
 
   useEffect(() => {
     fetchPlaylists();
+    const handleAuth = () => {
+      fetchPlaylists();
+    };
+    window.addEventListener('lyra:auth_changed', handleAuth);
+    return () => {
+      window.removeEventListener('lyra:auth_changed', handleAuth);
+    };
   }, [fetchPlaylists]);
 
   const createPlaylist = useCallback(async (name, cover = null) => {

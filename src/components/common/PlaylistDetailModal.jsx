@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAudio } from '../../context/AudioContext';
 import { useLikes } from '../../hooks/useLikes';
 import TrackImage from './TrackImage';
@@ -25,8 +26,19 @@ function formatTotalDuration(tracks) {
 }
 
 export default function PlaylistDetailModal({ playlist, isOpen, onClose }) {
-  const { play, setQueueAndPlay, currentTrack, isPlaying, togglePlayPause } = useAudio();
+  const { play, setQueueAndPlay, currentTrack, isPlaying, togglePlayPause, isCurrentTrack } = useAudio();
   const { isLiked, toggleLike } = useLikes();
+
+  // Bloquer le scroll de l'arrière-plan quand la modale est ouverte
+  useEffect(() => {
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow || 'auto';
+      };
+    }
+  }, [isOpen]);
 
   if (!isOpen || !playlist) return null;
 
@@ -41,17 +53,33 @@ export default function PlaylistDetailModal({ playlist, isOpen, onClose }) {
   };
 
   const handleTrackClick = (track, idx) => {
-    if (currentTrack?.videoId === track.videoId || currentTrack?.title === track.title) {
+    if (isCurrentTrack(track)) {
       togglePlayPause();
     } else {
       setQueueAndPlay(tracks, idx);
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 sm:p-6 overflow-y-auto fade-in">
+  const modalContent = (
+    <div 
+      className="fixed inset-0 top-0 left-0 right-0 bottom-0 w-screen h-screen z-[99999] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 sm:p-6 fade-in"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        backdropFilter: 'blur(12px)'
+      }}
+      onClick={onClose}
+    >
       <div 
-        className="relative w-full max-w-4xl bg-[#121110] border border-white/10 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[90vh]"
+        className="relative w-full max-w-4xl bg-[#121110] border border-white/10 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[85vh] my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header Banner with Gradient */}
@@ -138,7 +166,7 @@ export default function PlaylistDetailModal({ playlist, isOpen, onClose }) {
           </div>
 
           {tracks.map((track, idx) => {
-            const isCurrent = currentTrack?.videoId === track.videoId || currentTrack?.title === track.title;
+            const isCurrent = isCurrentTrack(track);
             return (
               <div
                 key={`pl-track-${track.videoId}-${idx}`}
@@ -201,4 +229,6 @@ export default function PlaylistDetailModal({ playlist, isOpen, onClose }) {
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : null;
 }

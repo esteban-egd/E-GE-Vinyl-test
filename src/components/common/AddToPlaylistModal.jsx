@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { usePlaylists } from '../../hooks/usePlaylists';
 import { X, Plus, ListMusic, Check, Sparkles, Lock } from 'lucide-react';
 import TrackImage from './TrackImage';
@@ -12,13 +13,39 @@ export default function AddToPlaylistModal({ track, isOpen, onClose }) {
   const [addedMap, setAddedMap] = useState({});
   const [toastMessage, setToastMessage] = useState(null);
 
+  useEffect(() => {
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow || 'auto';
+      };
+    }
+  }, [isOpen]);
+
   if (!isOpen || !track) return null;
 
   if (user?.is_guest) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md fade-in">
+    const guestModal = (
+      <div 
+        className="fixed inset-0 top-0 left-0 right-0 bottom-0 w-screen h-screen z-[99999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md fade-in"
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          zIndex: 99999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          backdropFilter: 'blur(12px)'
+        }}
+        onClick={onClose}
+      >
         <div 
-          className="w-full max-w-sm bg-[#161616] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center text-center text-white"
+          className="w-full max-w-sm bg-[#161616] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center text-center text-white my-auto max-h-[85vh] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="w-14 h-14 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 mb-4">
@@ -48,6 +75,7 @@ export default function AddToPlaylistModal({ track, isOpen, onClose }) {
         </div>
       </div>
     );
+    return typeof document !== 'undefined' ? createPortal(guestModal, document.body) : null;
   }
 
   const showToast = (msg) => {
@@ -79,10 +107,26 @@ export default function AddToPlaylistModal({ track, isOpen, onClose }) {
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md fade-in">
+  const modalContent = (
+    <div 
+      className="fixed inset-0 top-0 left-0 right-0 bottom-0 w-screen h-screen z-[99999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md fade-in"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        backdropFilter: 'blur(12px)'
+      }}
+      onClick={onClose}
+    >
       <div 
-        className="w-full max-w-md bg-[#161616] border border-white/10 rounded-2xl p-5 shadow-2xl relative overflow-hidden flex flex-col gap-4 text-white"
+        className="w-full max-w-md bg-[#161616] border border-white/10 rounded-2xl p-5 shadow-2xl relative overflow-hidden flex flex-col gap-4 text-white my-auto max-h-[85vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Toast Notification Notification */}
@@ -223,4 +267,6 @@ export default function AddToPlaylistModal({ track, isOpen, onClose }) {
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : null;
 }

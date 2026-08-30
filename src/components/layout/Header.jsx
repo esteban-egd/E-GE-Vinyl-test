@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import ProfileModal from '../profile/ProfileModal';
+import GuestRestrictedModal from '../common/GuestRestrictedModal';
 
 export default function Header({ onOpenMobileMenu = () => {} }) {
   const { user, profile } = useAuth();
@@ -11,6 +12,7 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstallable, setIsInstallable] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [showGuestModal, setShowGuestModal] = useState(false);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e) => {
@@ -34,6 +36,18 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
       setIsInstallable(false);
     }
     setDeferredPrompt(null);
+  };
+
+  const isGuest = !user || user.is_guest;
+  const displayName = isGuest ? 'Invitations E-GE' : (profile?.full_name || user?.email?.split('@')[0] || 'Compte');
+  const userSubtext = isGuest ? 'Mode Invité' : (profile?.username ? `@${profile.username.replace('@','')}` : 'Membre');
+  const avatarUrl = isGuest ? '' : profile?.avatar_url;
+
+  const handleProfileClick = (e) => {
+    if (isGuest) {
+      e.preventDefault();
+      setShowGuestModal(true);
+    }
   };
 
   return (
@@ -70,43 +84,79 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
         )}
 
         {user && (
-          <Link
-            to="/profile"
-            className="flex items-center gap-2.5 p-1.5 pr-3.5 rounded-full border transition-all group max-w-[180px] sm:max-w-none cursor-pointer hover:border-white/30"
-            style={{ backgroundColor: currentTheme.cardBg, borderColor: `${currentTheme.primary}40` }}
-          >
-            <div 
-              className="w-8 h-8 shrink-0 rounded-full overflow-hidden border transition-colors flex items-center justify-center relative shadow-sm"
-              style={{ backgroundColor: currentTheme.bg, borderColor: `${currentTheme.primary}60` }}
+          isGuest ? (
+            <button
+              type="button"
+              onClick={handleProfileClick}
+              className="flex items-center gap-2.5 p-1.5 pr-3.5 rounded-full border transition-all group max-w-[180px] sm:max-w-none cursor-pointer hover:border-white/30 text-left"
+              style={{ backgroundColor: currentTheme.cardBg, borderColor: `${currentTheme.primary}40` }}
             >
-              {profile?.avatar_url ? (
-                <img src={profile.avatar_url} alt="Profile" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-              ) : (
+              <div 
+                className="w-8 h-8 shrink-0 rounded-full overflow-hidden border transition-colors flex items-center justify-center relative shadow-sm"
+                style={{ backgroundColor: currentTheme.bg, borderColor: `${currentTheme.primary}60` }}
+              >
                 <div className="w-full h-full flex items-center justify-center text-gray-400">
                   <User size={16} />
                 </div>
-              )}
-            </div>
-            <div className="flex flex-col items-start leading-none min-w-0">
-              <div className="flex items-center gap-1.5 max-w-[110px] sm:max-w-xs">
-                <span className="text-xs font-black text-white uppercase tracking-tighter truncate">
-                  {profile?.full_name || user.email?.split('@')[0] || 'Compte'}
-                </span>
-                {user?.is_guest && (
-                  <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-[#c29e5a]/20 text-[#e1bb72] font-mono font-bold border border-[#c29e5a]/40 shrink-0">
-                    INVITÉ
+              </div>
+              <div className="flex flex-col items-start leading-none min-w-0">
+                <div className="flex items-center gap-1.5 max-w-[110px] sm:max-w-xs">
+                  <span className="text-xs font-black text-white uppercase tracking-tighter truncate">
+                    {displayName}
                   </span>
+                  <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-[#c29e5a]/15 text-[#e1bb72] font-semibold border border-[#c29e5a]/30 shrink-0">
+                    Invité
+                  </span>
+                </div>
+                <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5 truncate max-w-[90px] sm:max-w-xs" style={{ color: currentTheme.primary }}>
+                  {userSubtext}
+                </span>
+              </div>
+            </button>
+          ) : (
+            <Link
+              to="/profile"
+              className="flex items-center gap-2.5 p-1.5 pr-3.5 rounded-full border transition-all group max-w-[180px] sm:max-w-none cursor-pointer hover:border-white/30"
+              style={{ backgroundColor: currentTheme.cardBg, borderColor: `${currentTheme.primary}40` }}
+            >
+              <div 
+                className="w-8 h-8 shrink-0 rounded-full overflow-hidden border transition-colors flex items-center justify-center relative shadow-sm"
+                style={{ backgroundColor: currentTheme.bg, borderColor: `${currentTheme.primary}60` }}
+              >
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="Profile" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-400">
+                    <User size={16} />
+                  </div>
                 )}
               </div>
-              <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5 truncate max-w-[90px] sm:max-w-xs" style={{ color: currentTheme.primary }}>
-                {user?.is_guest ? 'Mode Démo' : (profile?.username ? `@${profile.username.replace('@','')}` : 'Membre')}
-              </span>
-            </div>
-          </Link>
+              <div className="flex flex-col items-start leading-none min-w-0">
+                <div className="flex items-center gap-1.5 max-w-[110px] sm:max-w-xs">
+                  <span className="text-xs font-black text-white uppercase tracking-tighter truncate">
+                    {displayName}
+                  </span>
+                  <span className="text-[7.5px] px-1.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-neutral-400 font-mono shrink-0">
+                    PRO
+                  </span>
+                </div>
+                <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5 truncate max-w-[90px] sm:max-w-xs" style={{ color: currentTheme.primary }}>
+                  {userSubtext}
+                </span>
+              </div>
+            </Link>
+          )
         )}
       </div>
 
       <ProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
+      
+      <GuestRestrictedModal
+        isOpen={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        title="Profil Privé & Personnalisation"
+        description="Le mode Invité est restreint. Connectez-vous ou créez un compte pour accéder à votre profil et personnaliser vos paramètres."
+      />
     </header>
   );
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
   User, Camera, Heart, Disc, Clock, Sparkles, Play, Trash2, 
-  LogOut, Save, ShieldCheck, Music, Users, Radio, Edit3
+  LogOut, Save, ShieldCheck, Music, Users, Radio, Edit3, Lock, LogIn
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -20,8 +20,10 @@ export default function ProfilePage() {
   const { currentTheme } = useTheme();
   const { likedTracks } = useLikes();
   const { playlists } = usePlaylists();
-  const { play, currentTrack, isPlaying } = useAudio();
+  const { play, currentTrack, isPlaying, isCurrentTrack } = useAudio();
   const navigate = useNavigate();
+
+  const isGuest = !user || user.is_guest;
 
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
   const [recentTracks, setRecentTracks] = useState([]);
@@ -130,6 +132,41 @@ export default function ProfilePage() {
       }
     }
   };
+
+  if (isGuest) {
+    return (
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-12 box-border fade-in pb-28 min-h-[60vh] flex flex-col items-center justify-center text-center">
+        <div 
+          className="w-20 h-20 rounded-full flex items-center justify-center mb-6 shadow-2xl border"
+          style={{ 
+            backgroundColor: `${currentTheme.primary}15`,
+            borderColor: `${currentTheme.primary}30`,
+            color: currentTheme.primary,
+            boxShadow: `0 0 25px ${currentTheme.glow || `${currentTheme.primary}20`}`
+          }}
+        >
+          <Lock size={38} />
+        </div>
+        <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tighter mb-3">
+          Profil Restreint
+        </h1>
+        <p className="text-gray-400 max-w-md text-sm mb-8 leading-relaxed">
+          Le mode Invité est restreint. Connectez-vous ou créez un compte pour accéder à votre profil, personnaliser votre avatar et configurer vos paramètres.
+        </p>
+        <button
+          onClick={() => signOut()}
+          className="px-6 py-3.5 text-black font-black rounded-full text-xs uppercase tracking-widest transition-all cursor-pointer shadow-lg active:scale-95 flex items-center gap-2"
+          style={{ 
+            backgroundColor: currentTheme.primary,
+            boxShadow: `0 0 20px ${currentTheme.glow || `${currentTheme.primary}30`}`
+          }}
+        >
+          <LogIn size={15} />
+          <span>Se connecter / Créer un compte</span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-5xl mx-auto px-6 py-6 flex flex-col gap-8 box-border">
@@ -320,7 +357,7 @@ export default function ProfilePage() {
             ) : (
               <div className="space-y-2">
                 {recentTracks.slice(0, 5).map((track, idx) => {
-                  const isCurrent = currentTrack?.videoId === track.videoId;
+                  const isCurrent = isCurrentTrack(track);
                   return (
                     <div 
                       key={track.videoId || idx}
