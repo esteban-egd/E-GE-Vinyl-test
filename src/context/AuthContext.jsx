@@ -9,20 +9,41 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (userId) => {
+    if (!userId) return null;
     try {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
       
       if (error && error.code !== 'PGRST116') {
-        throw error;
+        console.warn('Error fetching profile:', error.message);
       }
-      setProfile(data);
+
+      if (data) {
+        setProfile(data);
+
+        // 2. SCRIPT DE RESYNCHRONISATION AUTOMATIQUE (MIGRATION DE SECOURS)
+        // Remplit la colonne Display name dans Supabase Auth pour les anciens comptes
+        if (data.full_name) {
+          try {
+            await supabase.auth.updateUser({
+              data: {
+                full_name: data.full_name,
+                username: data.username || data.full_name
+              }
+            });
+          } catch (syncErr) {
+            console.warn('[AuthContext] Automatic resync of auth metadata failed:', syncErr?.message);
+          }
+        }
+        return data;
+      }
     } catch (error) {
       console.error('Error fetching profile:', error.message);
     }
+    return null;
   };
 
   useEffect(() => {
@@ -98,13 +119,16 @@ export const AuthProvider = ({ children }) => {
       is_guest: true 
     };
     const guestProfile = { 
+      id: guest.id,
       full_name: fullNameStr, 
       username: usernameStr,
+      email: emailStr,
       avatar_url: avatarStr
     };
     try {
       localStorage.setItem('ege_guest_user', JSON.stringify(guest));
       localStorage.setItem('ege_guest_profile', JSON.stringify(guestProfile));
+      supabase.from('profiles').upsert(guestProfile).catch(() => {});
     } catch (err) {
       console.warn('[Auth] LocalStorage error for guest user:', err);
     }

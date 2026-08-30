@@ -4,8 +4,16 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   username TEXT UNIQUE,
   full_name TEXT,
   avatar_url TEXT,
+  privacy_likes TEXT DEFAULT 'friends',
+  privacy_playlists TEXT DEFAULT 'friends',
+  privacy_artists TEXT DEFAULT 'friends',
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Migrations (if columns do not already exist)
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS privacy_likes TEXT DEFAULT 'friends';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS privacy_playlists TEXT DEFAULT 'friends';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS privacy_artists TEXT DEFAULT 'friends';
 
 -- Enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;

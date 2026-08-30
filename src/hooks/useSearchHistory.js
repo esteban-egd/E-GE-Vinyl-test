@@ -8,53 +8,36 @@ export function useSearchHistory() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  const userId = user?.id || user?.uid;
+
   const fetchHistory = useCallback(async () => {
+    if (!userId) {
+      setHistory([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
-      let localItems = [];
-      try {
-        if (db?.searchHistory) {
-          localItems = await db.searchHistory
-            .orderBy('createdAt')
-            .reverse()
-            .limit(10)
-            .toArray();
-        }
-      } catch (dexieErr) {
-        console.warn('Dexie search history fetch error:', dexieErr);
+      const { data, error } = await supabase
+        .from('search_history')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (!error && data) {
+        setHistory(data);
+      } else {
+        setHistory([]);
       }
-
-      if (user) {
-        try {
-          const { data, error } = await supabase
-            .from('search_history')
-            .select('*')
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false })
-            .limit(10);
-
-          if (!error && data && data.length > 0) {
-            setHistory(data);
-            return;
-          }
-        } catch (supaErr) {
-          console.warn('Supabase search history fetch error:', supaErr?.message);
-        }
-      }
-
-      setHistory(
-        localItems.map(item => ({
-          id: item.id,
-          query: item.query,
-          created_at: item.createdAt
-        }))
-      );
     } catch (err) {
       console.error('Error fetching search history:', err);
+      setHistory([]);
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
     fetchHistory();
@@ -71,25 +54,11 @@ export function useSearchHistory() {
     }
 
     try {
-      if (db?.searchHistory) {
-        const existing = await db.searchHistory
-          .filter(item => item.query?.toLowerCase() === cleanQuery.toLowerCase())
-          .toArray();
-        for (const ex of existing) {
-          await db.searchHistory.delete(ex.id);
-        }
-        await db.searchHistory.add({
-          userId: user ? user.id : 'guest',
-          query: cleanQuery,
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      if (user) {
+      if (userId) {
         await supabase
           .from('search_history')
           .insert({
-            user_id: user.id,
+            user_id: userId,
             query: cleanQuery
           });
       }
@@ -98,46 +67,36 @@ export function useSearchHistory() {
     } catch (err) {
       console.error('Error adding search history:', err);
     }
-  }, [user, history, fetchHistory]);
+  }, [userId, history, fetchHistory]);
 
   const deleteSearch = useCallback(async (id) => {
+    if (!userId) return;
     try {
-      if (db?.searchHistory && typeof id === 'number') {
-        await db.searchHistory.delete(id);
-      } else if (db?.searchHistory) {
-        await db.searchHistory.where('id').equals(id).delete().catch(() => {});
-      }
-
-      if (user) {
-        await supabase
-          .from('search_history')
-          .delete()
-          .eq('id', id)
-          .eq('user_id', user.id);
-      }
+      await supabase
+        .from('search_history')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', userId);
 
       setHistory(prev => prev.filter(item => item.id !== id));
     } catch (err) {
       console.error('Error deleting search history:', err);
     }
-  }, [user]);
+  }, [userId]);
 
   const clearHistory = useCallback(async () => {
+    if (!userId) return;
     try {
-      if (db?.searchHistory) {
-        await db.searchHistory.clear();
-      }
-      if (user) {
-        await supabase
-          .from('search_history')
-          .delete()
-          .eq('user_id', user.id);
-      }
+      await supabase
+        .from('search_history')
+        .delete()
+        .eq('user_id', userId);
+
       setHistory([]);
     } catch (err) {
       console.error('Error clearing search history:', err);
     }
-  }, [user]);
+  }, [userId]);
 
   return {
     history,

@@ -3,14 +3,16 @@ import { useAudio } from '../../context/AudioContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useLikes } from '../../hooks/useLikes';
 import { useOffline } from '../../hooks/useOffline';
+import { useSocial } from '../../context/SocialContext';
 import { useNavigate } from 'react-router-dom';
 import { getMainArtistName } from '../../services/musicDataService';
 import QueueDrawer from './QueueDrawer';
 import AddToPlaylistModal from '../common/AddToPlaylistModal';
+import MarqueeTitle from '../common/MarqueeTitle';
 import { 
   Play, Pause, SkipBack, SkipForward, 
   Shuffle, Repeat, Repeat1, Heart, Download, Check,
-  ListMusic, User, Plus
+  ListMusic, User, Plus, Share2
 } from 'lucide-react';
 
 export default function PlayerControls() {
@@ -22,6 +24,7 @@ export default function PlayerControls() {
 
   const { isLiked, toggleLike } = useLikes();
   const { isDownloaded, downloadTrack, isDownloading, removeTrack } = useOffline();
+  const { openShareModal } = useSocial();
   const { currentTheme } = useTheme();
   const navigate = useNavigate();
 
@@ -62,7 +65,7 @@ export default function PlayerControls() {
     );
   }
 
-  const trackLiked = isLiked(currentTrack);
+  const trackLiked = currentTrack ? isLiked(currentTrack) : false;
   const trackDownloaded = isDownloaded(currentTrack.videoId);
   const trackDownloading = isDownloading.has(currentTrack.videoId);
 
@@ -83,10 +86,12 @@ export default function PlayerControls() {
         
         {/* Title & Actions */}
         <div className="flex justify-between items-center">
-          <div className="flex-1 overflow-hidden pr-3">
-            <h2 className="text-lg md:text-xl font-bold text-white truncate text-equinox tracking-widest">
-              {currentTrack.title}
-            </h2>
+          <div className="flex-1 min-w-0 overflow-hidden pr-3">
+            <MarqueeTitle
+              text={currentTrack.title}
+              isPlaying={isPlaying}
+              className="text-lg md:text-xl font-bold text-white text-equinox tracking-widest"
+            />
             <p 
               onClick={() => navigate(`/artist/${encodeURIComponent(getMainArtistName(currentTrack.artist))}`)}
               className="text-xs md:text-sm font-medium truncate hover:underline cursor-pointer flex items-center gap-1.5 w-fit mt-0.5"
@@ -99,6 +104,14 @@ export default function PlayerControls() {
           
           <div className="flex gap-1.5 items-center shrink-0">
             <button
+              onClick={() => openShareModal(currentTrack)}
+              className="p-2 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+              title="Partager à un ami"
+            >
+              <Share2 size={20} />
+            </button>
+
+            <button
               onClick={() => setShowPlaylistModal(true)}
               className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors hover:text-white"
               title="Ajouter à une playlist (+)"
@@ -107,13 +120,19 @@ export default function PlayerControls() {
             </button>
 
             <button 
-              onClick={() => toggleLike(currentTrack)}
-              className="p-2 rounded-full hover:bg-white/10 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log("CLIC CŒUR CAPTURÉ", currentTrack);
+                toggleLike(currentTrack);
+              }}
+              className="p-2 rounded-full hover:bg-white/10 transition-colors relative z-50 cursor-pointer"
               title={trackLiked ? 'Favori' : 'Ajouter aux favoris'}
+              style={{ pointerEvents: 'auto', zIndex: 50 }}
             >
               <Heart 
                 size={20} 
-                className={trackLiked ? 'text-pink-500 fill-pink-500 neon-purple' : 'text-gray-400'} 
+                className={trackLiked ? 'text-red-500 fill-red-500 relative z-50 cursor-pointer' : 'text-gray-400 relative z-50 cursor-pointer'} 
+                style={{ pointerEvents: 'auto' }}
               />
             </button>
             

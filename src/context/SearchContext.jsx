@@ -81,51 +81,32 @@ export function SearchProvider({ children }) {
     };
   }, []);
 
-  // Chargement de l'historique (Dexie local + Supabase si connecté)
+  // Chargement de l'historique filtré par user.id directement en BDD
   const fetchHistory = useCallback(async () => {
+    const userId = user?.id || user?.uid;
+    if (!userId) {
+      setRecentSearches([]);
+      setHistoryLoading(false);
+      return;
+    }
+
     setHistoryLoading(true);
     try {
-      let localItems = [];
-      try {
-        if (db?.searchHistory) {
-          localItems = await db.searchHistory
-            .orderBy('createdAt')
-            .reverse()
-            .limit(10)
-            .toArray();
-        }
-      } catch (dexieErr) {
-        console.warn('Dexie search history fetch error:', dexieErr);
+      const { data, error: supaErr } = await supabase
+        .from('search_history')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (!supaErr && data) {
+        setRecentSearches(data);
+      } else {
+        setRecentSearches([]);
       }
-
-      if (user) {
-        try {
-          const { data, error: supaErr } = await supabase
-            .from('search_history')
-            .select('*')
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false })
-            .limit(10);
-
-          if (!supaErr && data && data.length > 0) {
-            setRecentSearches(data);
-            return;
-          }
-        } catch (supaErr) {
-          console.warn('Supabase search history fetch error:', supaErr?.message);
-        }
-      }
-
-      // Mode invité ou fallback local
-      setRecentSearches(
-        localItems.map(item => ({
-          id: item.id,
-          query: item.query,
-          created_at: item.createdAt
-        }))
-      );
     } catch (err) {
       console.error('Error fetching search history:', err);
+      setRecentSearches([]);
     } finally {
       setHistoryLoading(false);
     }
@@ -133,11 +114,20 @@ export function SearchProvider({ children }) {
 
   useEffect(() => {
     fetchHistory();
+    const handleAuth = () => {
+      fetchHistory();
+    };
+    window.addEventListener('lyra:auth_changed', handleAuth);
+    return () => {
+      window.removeEventListener('lyra:auth_changed', handleAuth);
+    };
   }, [fetchHistory]);
 
   const addRecentSearch = useCallback(async (term) => {
     if (!term || !term.trim()) return;
     const clean = term.trim();
+    const userId = user?.id || user?.uid;
+    if (!userId) return;
     
     // Éviter les doublons consécutifs
     if (recentSearches.length > 0 && recentSearches[0].query?.toLowerCase() === clean.toLowerCase()) {
@@ -145,30 +135,12 @@ export function SearchProvider({ children }) {
     }
 
     try {
-      // 1. Enregistrement local Dexie
-      if (db?.searchHistory) {
-        const existing = await db.searchHistory
-          .filter(item => item.query?.toLowerCase() === clean.toLowerCase())
-          .toArray();
-        for (const ex of existing) {
-          await db.searchHistory.delete(ex.id);
-        }
-        await db.searchHistory.add({
-          userId: user ? user.id : 'guest',
-          query: clean,
-          createdAt: new Date().toISOString()
+      await supabase
+        .from('search_history')
+        .insert({
+          user_id: userId,
+          query: clean
         });
-      }
-
-      // 2. Synchronisation Supabase si connecté
-      if (user) {
-        await supabase
-          .from('search_history')
-          .insert({
-            user_id: user.id,
-            query: clean
-          });
-      }
 
       fetchHistory();
     } catch (err) {
@@ -177,20 +149,15 @@ export function SearchProvider({ children }) {
   }, [user, recentSearches, fetchHistory]);
 
   const removeRecentSearch = useCallback(async (id) => {
-    try {
-      if (db?.searchHistory && typeof id === 'number') {
-        await db.searchHistory.delete(id);
-      } else if (db?.searchHistory) {
-        await db.searchHistory.where('id').equals(id).delete().catch(() => {});
-      }
+    const userId = user?.id || user?.uid;
+    if (!userId) return;
 
-      if (user) {
-        await supabase
-          .from('search_history')
-          .delete()
-          .eq('id', id)
-          .eq('user_id', user.id);
-      }
+    try {
+      await supabase
+        .from('search_history')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', userId);
 
       setRecentSearches((prev) => prev.filter((item) => item.id !== id));
     } catch (err) {
@@ -199,16 +166,15 @@ export function SearchProvider({ children }) {
   }, [user]);
 
   const clearRecentSearches = useCallback(async () => {
+    const userId = user?.id || user?.uid;
+    if (!userId) return;
+
     try {
-      if (db?.searchHistory) {
-        await db.searchHistory.clear();
-      }
-      if (user) {
-        await supabase
-          .from('search_history')
-          .delete()
-          .eq('user_id', user.id);
-      }
+      await supabase
+        .from('search_history')
+        .delete()
+        .eq('user_id', userId);
+
       setRecentSearches([]);
     } catch (err) {
       console.error('Error clearing search history:', err);

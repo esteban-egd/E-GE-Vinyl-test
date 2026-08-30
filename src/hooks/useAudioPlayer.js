@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import db from '../lib/db';
+import { useAuth } from '../context/AuthContext';
+import { recordListeningHistory, saveUserQueue, fetchUserQueue } from '../services/userBddService';
 import { getTrackAudioUrl, getCachedImageUrl } from '../services/offlineStorageService';
 import { getHdArtwork, getMainArtistName, isLiveTrack, isClipTrack, scoreAudioTrack } from '../services/musicDataService';
 import { searchLyraMusic, extractYouTubeId } from '../services/lyraAudio';
@@ -119,6 +121,7 @@ function stopVinylNoise() {
 }
 
 export function useAudioPlayer() {
+  const { user } = useAuth();
   const isNative = isNativeEnvironment();
   const audioRef = useRef(null);
   const prebufferAudioRef = useRef(null);
@@ -140,6 +143,49 @@ export function useAudioPlayer() {
   const [currentTrack, setCurrentTrack] = useState(null);
   const [queue, setQueue] = useState([]);
   const [queueIndex, setQueueIndex] = useState(-1);
+
+  // Restore queue from BDD when user logs in
+  useEffect(() => {
+    const userId = user?.id || user?.uid;
+    if (!userId) {
+      setQueue([]);
+      setCurrentTrack(null);
+      setQueueIndex(-1);
+      return;
+    }
+
+    let isSubscribed = true;
+    (async () => {
+      try {
+        const saved = await fetchUserQueue(userId);
+        if (isSubscribed && saved && saved.queue && saved.queue.length > 0) {
+          setQueue(saved.queue);
+          setQueueIndex(saved.queueIndex >= 0 ? saved.queueIndex : 0);
+          if (saved.currentTrack) {
+            setCurrentTrack(saved.currentTrack);
+          }
+        }
+      } catch (err) {
+        console.warn('Error restoring user queue from BDD:', err);
+      }
+    })();
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [user?.id, user?.uid]);
+
+  // Auto-save queue to BDD whenever queue or currentTrack changes
+  useEffect(() => {
+    const userId = user?.id || user?.uid;
+    if (!userId) return;
+
+    const timer = setTimeout(() => {
+      saveUserQueue(userId, queue, queueIndex, currentTrack);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [user?.id, user?.uid, queue, queueIndex, currentTrack]);
   const [shuffle, setShuffle] = useState(() => {
     try {
       return localStorage.getItem('lyra_shuffle') === 'true';
@@ -286,6 +332,8 @@ export function useAudioPlayer() {
       }
       
       el.preload = 'auto';
+      el.playsInline = true;
+      el.setAttribute('playsinline', '');
       if ('preservesPitch' in el) {
         el.preservesPitch = true;
       }
@@ -326,6 +374,8 @@ export function useAudioPlayer() {
         pEl.id = 'prebuffer-player';
         pEl.style.display = 'none';
         pEl.preload = 'auto';
+        pEl.playsInline = true;
+        pEl.setAttribute('playsinline', '');
         pEl.crossOrigin = 'anonymous';
         document.body.appendChild(pEl);
       }
@@ -344,8 +394,14 @@ export function useAudioPlayer() {
         } catch (_) {}
       }
     };
+    const onLoadedMetadata = () => {
+      if (activeEngineRef.current === 'audio' && audio.duration && !isNaN(audio.duration) && isFinite(audio.duration) && audio.duration > 0) {
+        console.log('[AudioEngine] Real media duration detected onLoadedMetadata:', audio.duration);
+        setDuration(audio.duration);
+      }
+    };
     const onDurationChange = () => {
-      if (activeEngineRef.current === 'audio' && !isNaN(audio.duration)) {
+      if (activeEngineRef.current === 'audio' && audio.duration && !isNaN(audio.duration) && isFinite(audio.duration) && audio.duration > 0) {
         setDuration(audio.duration);
       }
     };
@@ -354,6 +410,9 @@ export function useAudioPlayer() {
         setIsPlaying(true);
         setIsLoading(false);
         setError(null);
+        if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration) && audio.duration > 0) {
+          setDuration(audio.duration);
+        }
       }
     };
     const onPause = () => {
@@ -369,6 +428,9 @@ export function useAudioPlayer() {
     const onCanPlay = () => {
       if (activeEngineRef.current === 'audio') {
         setIsLoading(false);
+        if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration) && audio.duration > 0) {
+          setDuration(audio.duration);
+        }
       }
     };
     const onEnded = () => {
@@ -381,6 +443,7 @@ export function useAudioPlayer() {
         console.warn('[AudioEngine] Erreur audio HTML5, essai YouTube Iframe fallback...');
         if (currentTrack?.videoId && iframePlayerRef.current) {
           activeEngineRef.current = 'iframe';
+          if (typeof iframePlayerRef.current.seekTo === 'function') iframePlayerRef.current.seekTo(0, true);
           iframePlayerRef.current.loadVideoById(currentTrack.videoId, 0);
         } else {
           setIsPlaying(false);
@@ -391,6 +454,7 @@ export function useAudioPlayer() {
 
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('durationchange', onDurationChange);
+    audio.addEventListener('loadedmetadata', onLoadedMetadata);
     audio.addEventListener('play', onPlay);
     audio.addEventListener('pause', onPause);
     audio.addEventListener('waiting', onWaiting);
@@ -401,6 +465,7 @@ export function useAudioPlayer() {
     return () => {
       audio.removeEventListener('timeupdate', onTimeUpdate);
       audio.removeEventListener('durationchange', onDurationChange);
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
       audio.removeEventListener('play', onPlay);
       audio.removeEventListener('pause', onPause);
       audio.removeEventListener('waiting', onWaiting);
@@ -518,32 +583,19 @@ export function useAudioPlayer() {
       fadeIntervalRef.current = null;
     }
     
-    let currentVol = volume;
-    const fadeSteps = 10;
-    const fadeStepTime = 50; // 500ms total
-    const stepAmount = volume / fadeSteps;
-    
-    fadeIntervalRef.current = setInterval(() => {
-      currentVol -= stepAmount;
-      if (currentVol <= 0) {
-        clearInterval(fadeIntervalRef.current);
-        fadeIntervalRef.current = null;
-        currentVol = 0;
-        
-        if (activeEngineRef.current === 'iframe' && iframePlayerRef.current?.pauseVideo) {
-          try { iframePlayerRef.current.pauseVideo(); } catch {}
-        } else if (activeEngineRef.current === 'audio' && audioRef.current) {
-          audioRef.current.pause();
-        }
-      }
-      
-      if (iframePlayerRef.current?.setVolume) {
-        try { iframePlayerRef.current.setVolume(Math.round(currentVol * 100)); } catch {}
-      }
-      if (audioRef.current) {
-        audioRef.current.volume = Math.max(0, currentVol);
-      }
-    }, fadeStepTime);
+    // Set immediate volume back to normal so next play is clean
+    if (iframePlayerRef.current?.setVolume) {
+      try { iframePlayerRef.current.setVolume(Math.round(volume * 100)); } catch {}
+    }
+    if (audioRef.current) {
+      audioRef.current.volume = volume;
+    }
+
+    if (activeEngineRef.current === 'iframe' && iframePlayerRef.current?.pauseVideo) {
+      try { iframePlayerRef.current.pauseVideo(); } catch {}
+    } else if (activeEngineRef.current === 'audio' && audioRef.current) {
+      try { audioRef.current.pause(); } catch {}
+    }
   }, [volume]);
 
   const resetPlayer = useCallback(() => {
@@ -620,6 +672,17 @@ export function useAudioPlayer() {
       window.removeEventListener('lyra:reset_player', handleResetEvent);
     };
   }, [resetPlayer]);
+
+  const lastUserIdRef = useRef(user?.id || user?.uid || 'guest');
+
+  useEffect(() => {
+    const currentUserId = user?.id || user?.uid || 'guest';
+    if (currentUserId !== lastUserIdRef.current) {
+      console.log(`[AudioEngine] Session changed: ${lastUserIdRef.current} -> ${currentUserId}. Resetting player...`);
+      lastUserIdRef.current = currentUserId;
+      resetPlayer();
+    }
+  }, [user?.id, user?.uid, resetPlayer]);
 
   const resume = useCallback(() => {
     if (!currentTrack) return;
@@ -722,6 +785,8 @@ export function useAudioPlayer() {
 
     setError(null);
     setIsLoading(true);
+    setCurrentTime(0);
+    setDuration(0);
     setCurrentTrack(trackMeta);
     updateMediaSessionMetadata(trackMeta);
 
@@ -729,7 +794,10 @@ export function useAudioPlayer() {
     if (audioRef.current) {
       try {
         audioRef.current.pause();
+        audioRef.current.removeAttribute('src');
         audioRef.current.src = '';
+        audioRef.current.load();
+        audioRef.current.currentTime = 0;
       } catch (_) {}
     }
 
@@ -1034,13 +1102,30 @@ export function useAudioPlayer() {
       return newQueue;
     });
 
-    // Save history in background
+    // Save history in BDD linked to user.id
     (async () => {
       try {
-        await db.tracks.put({ ...trackMeta, addedAt: Date.now() });
-      } catch {}
+        if (user) {
+          await recordListeningHistory(user, trackMeta);
+        }
+      } catch (err) {
+        console.warn('Error recording listening history:', err);
+      }
     })();
-  }, [updateMediaSessionMetadata, volume]);
+  }, [updateMediaSessionMetadata, volume, user]);
+
+  // Remote play event listener (from Toast notifications)
+  useEffect(() => {
+    const handlePlayEvent = (e) => {
+      if (e.detail) {
+        play(e.detail);
+      }
+    };
+    window.addEventListener('lyra:play_track', handlePlayEvent);
+    return () => {
+      window.removeEventListener('lyra:play_track', handlePlayEvent);
+    };
+  }, [play]);
 
   const playFromQueue = useCallback(async (index) => {
     if (index >= 0 && index < queue.length) {

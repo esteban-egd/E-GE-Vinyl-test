@@ -7,6 +7,10 @@ import { SearchProvider } from './context/SearchContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { OfflineProvider } from './context/OfflineContext';
 import { LikesProvider } from './context/LikesContext';
+import { MessageProvider } from './context/MessageContext';
+import { SocialProvider } from './context/SocialContext';
+import ShareTrackModal from './components/social/ShareTrackModal';
+
 import Sidebar from './components/layout/Sidebar';
 import BottomNav from './components/layout/BottomNav';
 import Header from './components/layout/Header';
@@ -25,6 +29,8 @@ import PresentationPage from './pages/PresentationPage';
 import NotFoundPage from './pages/NotFoundPage';
 import OfflineNotice from './components/common/OfflineNotice';
 import OfflineSyncBar from './components/common/OfflineSyncBar';
+import ContextBanner from './components/common/ContextBanner';
+import MessageLogic from './components/common/MessageLogic';
 import { MOCK_VINYLS } from './data/mockVinyls';
 
 function AppContent() {
@@ -121,6 +127,8 @@ function AppContent() {
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-[var(--color-canvas)] text-[var(--color-charcoal)] font-sans flex-col">
+      <MessageLogic />
+      <ContextBanner />
       <OfflineNotice />
       <OfflineSyncBar />
       <div className="flex flex-1 w-full overflow-hidden relative">
@@ -175,31 +183,44 @@ function AppContent() {
   );
 }
 
+function AppProvidersWithAuth({ children }) {
+  return (
+    <AudioProvider>
+      <SearchProvider>
+        <SocialProvider>
+          <OfflineProvider>
+            <LikesProvider>
+              <MessageProvider>
+                {children}
+              </MessageProvider>
+            </LikesProvider>
+          </OfflineProvider>
+        </SocialProvider>
+      </SearchProvider>
+    </AudioProvider>
+  );
+}
+
 function App() {
   return (
-    <ThemeProvider>
-      <AudioProvider>
-        <SearchProvider>
-          <AuthProvider>
-            <OfflineProvider>
-              <LikesProvider>
-                <Toaster position="top-center" toastOptions={{
-                  style: {
-                    background: '#1c1815',
-                    color: '#e6dfd5',
-                    borderRadius: '12px',
-                    border: '1px solid #302116',
-                  }
-                }} />
-                <Router>
-                  <AppContent />
-                </Router>
-              </LikesProvider>
-            </OfflineProvider>
-          </AuthProvider>
-        </SearchProvider>
-      </AudioProvider>
-    </ThemeProvider>
+    <AuthProvider>
+      <ThemeProvider>
+        <AppProvidersWithAuth>
+          <Toaster position="top-center" toastOptions={{
+            style: {
+              background: '#1c1815',
+              color: '#e6dfd5',
+              borderRadius: '12px',
+              border: '1px solid #302116',
+            }
+          }} />
+          <ShareTrackModal />
+          <Router>
+            <AppContent />
+          </Router>
+        </AppProvidersWithAuth>
+      </ThemeProvider>
+    </AuthProvider>
   );
 }
 

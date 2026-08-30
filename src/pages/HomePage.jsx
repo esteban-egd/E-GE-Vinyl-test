@@ -16,6 +16,7 @@ import ArtistAvatar from '../components/common/ArtistAvatar';
 import AddToPlaylistModal from '../components/common/AddToPlaylistModal';
 import PlaylistDetailModal from '../components/common/PlaylistDetailModal';
 import db from '../lib/db';
+import { fetchListeningHistory } from '../services/userBddService';
 import { 
   Search, 
   Play, 
@@ -65,15 +66,21 @@ export default function HomePage() {
     return "Bonsoir";
   }, []);
 
-  // Load user listening history from Dexie DB
+  // Load user listening history from BDD linked to user.id
   useEffect(() => {
     let isMounted = true;
     async function loadUserHistory() {
+      const userId = user?.id || user?.uid;
+      if (!userId) {
+        if (isMounted) setRecentPlayedTracks([]);
+        return;
+      }
+
       try {
-        const history = await db.tracks.orderBy('addedAt').reverse().limit(16).toArray();
-        if (isMounted && history && history.length > 0) {
-          setRecentPlayedTracks(history);
-          if (history[0]?.artist) {
+        const history = await fetchListeningHistory(userId, 16);
+        if (isMounted) {
+          setRecentPlayedTracks(history || []);
+          if (history && history[0]?.artist) {
             setSeedArtistName(getMainArtistName(history[0].artist));
           }
         }
@@ -83,7 +90,7 @@ export default function HomePage() {
     }
     loadUserHistory();
     return () => { isMounted = false; };
-  }, [currentTrack]);
+  }, [user?.id, user?.uid, currentTrack]);
 
   // Fetch Deezer Official Chart (Albums, Tracks, Artists)
   useEffect(() => {

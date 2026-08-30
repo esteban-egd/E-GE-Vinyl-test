@@ -109,12 +109,14 @@ export default function QueueDrawer({ isOpen, onClose }) {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      console.log("CLIC CŒUR CAPTURÉ", track);
                       toggleLike(track);
                     }}
-                    className="p-1.5 transition-colors"
+                    className="p-1.5 transition-colors relative z-50 cursor-pointer"
                     title={liked ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+                    style={{ pointerEvents: 'auto', zIndex: 50 }}
                   >
-                    <Heart size={16} className={liked ? 'text-red-500 fill-red-500 drop-shadow-sm' : 'text-gray-500 hover:text-white'} />
+                    <Heart size={16} className={liked ? 'text-red-500 fill-red-500 drop-shadow-sm relative z-50 cursor-pointer' : 'text-gray-500 hover:text-white relative z-50 cursor-pointer'} style={{ pointerEvents: 'auto' }} />
                   </button>
 
                   <button

@@ -13,6 +13,7 @@ import AudioVisualizationDiagram from './AudioVisualizationDiagram';
 import PlayerControls from './PlayerControls';
 import LyricsView from './LyricsView';
 import DownloadBadge from '../common/DownloadBadge';
+import MarqueeTitle from '../common/MarqueeTitle';
 import { 
   Disc, Sliders, ToggleLeft, ToggleRight,
   Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, 
@@ -615,12 +616,12 @@ export default function VinylPlayer() {
           {/* Title, Artist and action buttons */}
           <div className="flex justify-between items-center w-full">
             <div className="flex-1 min-w-0 pr-3">
-              <h2 className="text-sm sm:text-base font-black text-white truncate leading-tight">
-                <span className="flex items-center gap-2">
-                  {currentTrack?.title || "Aucun vinyle sélectionné"}
-                  {currentTrack && <DownloadBadge videoId={currentTrack.videoId || currentTrack.id} />}
-                </span>
-              </h2>
+              <MarqueeTitle
+                text={currentTrack?.title || "Aucun vinyle sélectionné"}
+                isPlaying={isPlaying}
+                badge={currentTrack ? <DownloadBadge videoId={currentTrack.videoId || currentTrack.id} /> : null}
+                className="text-sm sm:text-base font-black text-white leading-tight"
+              />
               <p 
                 className="text-xs text-gray-400 truncate mt-0.5 cursor-pointer hover:text-white transition-colors"
                 onClick={() => {
@@ -634,14 +635,18 @@ export default function VinylPlayer() {
               </p>
             </div>
             
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 relative z-50">
               <button
                 disabled={!currentTrack}
-                onClick={() => toggleLike(currentTrack)}
-                className="p-1.5 rounded-full hover:bg-white/5 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                style={{ color: (trackLiked && currentTrack) ? (currentTheme?.primary || '#1ED760') : '#9ca3af' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  console.log("CLIC CŒUR CAPTURÉ", currentTrack);
+                  toggleLike(currentTrack);
+                }}
+                className="p-1.5 rounded-full hover:bg-white/5 transition-all cursor-pointer relative z-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{ color: (trackLiked && currentTrack) ? '#ef4444' : '#9ca3af', pointerEvents: 'auto', zIndex: 50 }}
               >
-                <Heart size={18} fill={(trackLiked && currentTrack) ? (currentTheme?.primary || '#1ED760') : 'none'} />
+                <Heart size={18} fill={(trackLiked && currentTrack) ? '#ef4444' : 'none'} className={(trackLiked && currentTrack) ? 'text-red-500 relative z-50 cursor-pointer' : 'relative z-50 cursor-pointer'} style={{ pointerEvents: 'auto' }} />
               </button>
               <button
                 disabled={!currentTrack}

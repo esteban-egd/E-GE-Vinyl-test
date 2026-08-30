@@ -1,15 +1,18 @@
 import { useState } from 'react';
-import { NavLink, Link, useLocation } from 'react-router-dom';
+import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Home, Search, Library, Settings, Disc3, LogOut, User, X, Sparkles, ChevronRight } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useSocial } from '../../context/SocialContext';
 import { toast } from 'react-hot-toast';
 import GuestRestrictedModal from '../common/GuestRestrictedModal';
 
 export default function Sidebar({ isOpen = false, onClose = () => {} }) {
   const { currentTheme } = useTheme();
   const { user, profile, signOut } = useAuth();
+  const { totalUnreadCount = 0 } = useSocial() || {};
   const location = useLocation();
+  const navigate = useNavigate();
   const [showGuestModal, setShowGuestModal] = useState(false);
 
   const handleSignOut = async () => {
@@ -30,8 +33,17 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
   ];
 
   const isGuest = !user || user.is_guest;
-  const displayName = isGuest ? 'Invitations E-GE' : (profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Audiophile');
-  const username = isGuest ? 'Mode Invité' : (profile?.username ? `@${profile.username.replace('@', '')}` : (user?.email ? `@${user.email.split('@')[0]}` : '@audiophile'));
+  
+  const rawDisplayName = profile?.full_name?.trim() || profile?.username?.trim();
+  const rawUsername = profile?.username?.trim();
+  
+  // Rule: Use profile.full_name / profile.username, never split email if profile exists
+  const userTitle = profile 
+    ? (rawDisplayName || rawUsername || 'Membre E-GE') 
+    : (user?.email ? user.email.split('@')[0] : 'Utilisateur');
+  
+  const displayName = isGuest ? 'Invitations E-GE' : userTitle;
+  const usernameSubtext = isGuest ? 'Mode Invité' : (rawUsername && rawUsername !== userTitle ? `@${rawUsername.replace('@', '')}` : null);
   const avatarUrl = isGuest ? '' : profile?.avatar_url;
 
   const handleProfileClick = (e) => {
@@ -41,6 +53,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
       return;
     }
     onClose();
+    navigate('/profile');
   };
 
   const content = (
@@ -147,17 +160,24 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span 
-                className="text-[9.5px] font-semibold tracking-wide truncate max-w-[130px]"
-                style={{ color: currentTheme.primary }}
-              >
-                {username}
-              </span>
-            </div>
+            {usernameSubtext && (
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span 
+                  className="text-[9.5px] font-semibold tracking-wide truncate max-w-[130px] text-red-400/90"
+                >
+                  {usernameSubtext}
+                </span>
+              </div>
+            )}
           </div>
 
           <ChevronRight size={14} className="text-neutral-500 group-hover:text-white group-hover:translate-x-0.5 transition-all shrink-0" />
+          
+          {totalUnreadCount > 0 && (
+            <span className="absolute top-2 right-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white font-extrabold text-[9px] flex items-center justify-center border border-neutral-900 shadow-md animate-pulse">
+              {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+            </span>
+          )}
         </button>
       </div>
 

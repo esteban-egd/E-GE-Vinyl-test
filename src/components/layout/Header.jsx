@@ -3,12 +3,14 @@ import { Download, User, Menu } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useSocial } from '../../context/SocialContext';
 import ProfileModal from '../profile/ProfileModal';
 import GuestRestrictedModal from '../common/GuestRestrictedModal';
 
 export default function Header({ onOpenMobileMenu = () => {} }) {
   const { user, profile } = useAuth();
   const { currentTheme } = useTheme();
+  const { totalUnreadCount = 0 } = useSocial() || {};
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstallable, setIsInstallable] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -39,8 +41,17 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
   };
 
   const isGuest = !user || user.is_guest;
-  const displayName = isGuest ? 'Invitations E-GE' : (profile?.full_name || user?.email?.split('@')[0] || 'Compte');
-  const userSubtext = isGuest ? 'Mode Invité' : (profile?.username ? `@${profile.username.replace('@','')}` : 'Membre');
+  
+  const rawDisplayName = profile?.full_name?.trim() || profile?.username?.trim();
+  const rawUsername = profile?.username?.trim();
+  
+  // Rule: Use profile.full_name / profile.username, never split email if profile exists
+  const userTitle = profile 
+    ? (rawDisplayName || rawUsername || 'Membre E-GE') 
+    : (user?.email ? user.email.split('@')[0] : 'Utilisateur');
+  
+  const displayName = isGuest ? 'Invitations E-GE' : userTitle;
+  const userSubtext = isGuest ? 'Mode Invité' : (rawUsername && rawUsername !== userTitle ? `@${rawUsername.replace('@', '')}` : null);
   const avatarUrl = isGuest ? '' : profile?.avatar_url;
 
   const handleProfileClick = (e) => {
@@ -108,15 +119,17 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
                     Invité
                   </span>
                 </div>
-                <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5 truncate max-w-[90px] sm:max-w-xs" style={{ color: currentTheme.primary }}>
-                  {userSubtext}
-                </span>
+                {userSubtext && (
+                  <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5 truncate max-w-[90px] sm:max-w-xs text-red-400/90">
+                    {userSubtext}
+                  </span>
+                )}
               </div>
             </button>
           ) : (
             <Link
               to="/profile"
-              className="flex items-center gap-2.5 p-1.5 pr-3.5 rounded-full border transition-all group max-w-[180px] sm:max-w-none cursor-pointer hover:border-white/30"
+              className="flex items-center gap-2.5 p-1.5 pr-3.5 rounded-full border transition-all group max-w-[180px] sm:max-w-none cursor-pointer hover:border-white/30 relative"
               style={{ backgroundColor: currentTheme.cardBg, borderColor: `${currentTheme.primary}40` }}
             >
               <div 
@@ -140,10 +153,18 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
                     PRO
                   </span>
                 </div>
-                <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5 truncate max-w-[90px] sm:max-w-xs" style={{ color: currentTheme.primary }}>
-                  {userSubtext}
-                </span>
+                {userSubtext && (
+                  <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5 truncate max-w-[90px] sm:max-w-xs text-red-400/90">
+                    {userSubtext}
+                  </span>
+                )}
               </div>
+
+              {totalUnreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-red-600 text-white font-extrabold text-[10px] flex items-center justify-center border-2 border-neutral-900 shadow-lg animate-pulse z-10">
+                  {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+                </span>
+              )}
             </Link>
           )
         )}

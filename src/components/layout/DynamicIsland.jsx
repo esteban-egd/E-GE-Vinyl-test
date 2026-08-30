@@ -3,6 +3,7 @@ import { useAudio } from '../../context/AudioContext';
 import { useLikes } from '../../hooks/useLikes';
 import { Play, Pause, Volume2, VolumeX, Heart } from 'lucide-react';
 import TrackImage from '../common/TrackImage';
+import MarqueeTitle from '../common/MarqueeTitle';
 
 export default function DynamicIsland() {
   const { currentTrack, isPlaying, togglePlayPause, audioRef } = useAudio();
@@ -74,8 +75,12 @@ export default function DynamicIsland() {
               className={`w-full h-full object-cover ${isPlaying ? 'animate-[spin_4s_linear_infinite]' : ''}`}
             />
           </div>
-          <div className="flex-1 overflow-hidden flex flex-col justify-center">
-            <h4 className="text-sm font-bold text-[var(--color-charcoal)] truncate">{currentTrack.title}</h4>
+          <div className="flex-1 min-w-0 overflow-hidden flex flex-col justify-center">
+            <MarqueeTitle
+              text={currentTrack.title}
+              isPlaying={isPlaying}
+              className="text-sm font-bold text-[var(--color-charcoal)]"
+            />
             <p className="text-xs text-[var(--color-muted)] truncate">{currentTrack.artist}</p>
           </div>
           <button onClick={() => toggleLike(currentTrack)} className="p-2 transition-transform active:scale-90">

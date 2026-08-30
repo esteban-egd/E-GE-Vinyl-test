@@ -147,10 +147,12 @@ export default function Tonearm() {
           style={{
             transformOrigin: '80px 45px',
             transform: `rotate(${currentRotation}deg)`,
-            // Fluid mechanical transition only when not manually dragging
+            // Fluid mechanical transition only when not manually dragging, and instant when paused
             transition: isDragging 
               ? 'none' 
-              : 'transform 1.1s cubic-bezier(0.22, 1, 0.36, 1)'
+              : isPlaying
+                ? 'transform 1.1s cubic-bezier(0.22, 1, 0.36, 1)'
+                : 'none'
           }}
         >
           {/* Weighted balance cylinder at rear */}

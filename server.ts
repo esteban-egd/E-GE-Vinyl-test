@@ -68,8 +68,18 @@ async function startServer() {
       const q = (req.query.q as string || "").trim();
       if (!q) return res.status(400).json({ error: "Missing query q" });
 
-      const tracks: Array<{ id: string; videoId: string; title: string; artist: string; thumbnail: string }> = [];
+      const tracks: Array<{ id: string; videoId: string; title: string; artist: string; thumbnail: string; duration?: number }> = [];
       const seenIds = new Set<string>();
+
+      const parseDurationStr = (durText?: string): number => {
+        if (!durText) return 0;
+        const match = durText.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/);
+        if (!match) return 0;
+        if (match[3]) {
+          return parseInt(match[1], 10) * 3600 + parseInt(match[2], 10) * 60 + parseInt(match[3], 10);
+        }
+        return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+      };
 
       // 1. YouTube Web Search (videoRenderer)
       try {
@@ -104,12 +114,15 @@ async function startServer() {
                 const title = v.title?.runs?.[0]?.text || v.title?.simpleText || '';
                 const artist = v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || '';
                 const thumb = v.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+                const lengthText = v.lengthText?.simpleText || v.lengthText?.runs?.[0]?.text || '';
+                const duration = parseDurationStr(lengthText) || parseDurationStr(artist);
                 tracks.push({
                   id: v.videoId,
                   videoId: v.videoId,
                   title,
                   artist,
-                  thumbnail: thumb
+                  thumbnail: thumb,
+                  ...(duration > 0 ? { duration } : {})
                 });
               }
             }
@@ -161,13 +174,15 @@ async function startServer() {
               if (videoId && !seenIds.has(videoId)) {
                 seenIds.add(videoId);
                 const title = card.title?.runs?.[0]?.text || '';
-                const artist = card.subtitle?.runs?.map((r: any) => r.text).join('') || '';
+                const subtitleStr = card.subtitle?.runs?.map((r: any) => r.text).join('') || '';
+                const duration = parseDurationStr(subtitleStr);
                 tracks.unshift({
                   id: videoId,
                   videoId,
                   title,
-                  artist,
-                  thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+                  artist: subtitleStr,
+                  thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+                  ...(duration > 0 ? { duration } : {})
                 });
               }
             }
@@ -187,12 +202,15 @@ async function startServer() {
                 const title = r.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || '';
                 const artistRuns = r.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
                 const artist = artistRuns.map((a: any) => a.text).join('') || '';
+                const fixedColText = r.fixedColumns?.[0]?.musicResponsiveListItemFixedColumnRenderer?.text?.runs?.[0]?.text || '';
+                const duration = parseDurationStr(fixedColText) || parseDurationStr(artist);
                 tracks.push({
                   id: videoId,
                   videoId,
                   title,
                   artist,
-                  thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+                  thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+                  ...(duration > 0 ? { duration } : {})
                 });
               }
             }
@@ -666,10 +684,11 @@ async function startServer() {
           });
           if (invRes.ok) {
             const invData = await invRes.json();
-            const format = invData.adaptiveFormats?.find((f: any) => f.mimeType?.startsWith('audio/'));
-            if (format?.url) {
-              audioStreamUrl = format.url;
-              contentType = format.mimeType || 'audio/webm';
+            const audioFormats = invData.adaptiveFormats?.filter((f: any) => f.url && f.mimeType?.startsWith('audio/')) || [];
+            if (audioFormats.length > 0) {
+              audioFormats.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+              audioStreamUrl = audioFormats[0].url;
+              contentType = audioFormats[0].mimeType || 'audio/webm';
               break;
             }
           }
@@ -706,26 +725,62 @@ async function startServer() {
         return res.status(404).json({ error: 'No full audio stream available' });
       }
 
-      // Proxy the stream completely to avoid CORS and Mobile WebView limitations
-      const audioFetch = await fetch(audioStreamUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      });
+      const headers: Record<string, string> = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      };
 
-      if (!audioFetch.ok) {
+      if (req.headers.range) {
+        headers['Range'] = req.headers.range as string;
+      }
+
+      // Proxy the stream completely to avoid CORS and Mobile WebView limitations
+      const audioFetch = await fetch(audioStreamUrl, { headers });
+
+      if (!audioFetch.ok && audioFetch.status !== 206) {
         return res.status(audioFetch.status).json({ error: 'Failed to fetch audio stream source' });
       }
 
-      res.setHeader('Content-Type', contentType);
+      res.status(audioFetch.status);
+
+      // Copy streaming headers from upstream
+      audioFetch.headers.forEach((val, key) => {
+        const lowerKey = key.toLowerCase();
+        if (
+          lowerKey === 'content-type' ||
+          lowerKey === 'content-length' ||
+          lowerKey === 'accept-ranges' ||
+          lowerKey === 'content-range' ||
+          lowerKey === 'cache-control'
+        ) {
+          res.setHeader(key, val);
+        }
+      });
+
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      
-      if (audioFetch.headers.get('content-length')) {
-        res.setHeader('Content-Length', audioFetch.headers.get('content-length')!);
+      if (!res.getHeader('Accept-Ranges')) {
+        res.setHeader('Accept-Ranges', 'bytes');
       }
 
-      // Node.js stream piping to respond efficiently (avoids fully buffering in memory)
-      const arrayBuffer = await audioFetch.arrayBuffer();
-      res.end(Buffer.from(arrayBuffer));
+      // Stream the response body directly to avoid buffering the entire file in memory
+      if (audioFetch.body) {
+        const reader = audioFetch.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              res.end();
+              break;
+            }
+            res.write(Buffer.from(value));
+          }
+        } catch (streamErr) {
+          console.error('[Server] Stream piping error:', streamErr);
+          res.end();
+        }
+      } else {
+        const arrayBuffer = await audioFetch.arrayBuffer();
+        res.end(Buffer.from(arrayBuffer));
+      }
     } catch (err: any) {
       console.error('[Server] Audio stream error:', err.message);
       res.status(500).json({ error: err.message });

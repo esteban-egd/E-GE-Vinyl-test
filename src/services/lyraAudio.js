@@ -323,10 +323,10 @@ export async function getLyraAudioStream(videoId, title, artist, targetDuration 
       });
       if (res.ok) {
         const data = await res.json();
-        // Look for adaptiveFormats or formatStreams that contain audio
-        const audioFormat = data.adaptiveFormats?.find(f => f.mimeType?.startsWith('audio/'));
-        if (audioFormat?.url) {
-          return audioFormat.url;
+        const audioFormats = data.adaptiveFormats?.filter(f => f.url && f.mimeType?.startsWith('audio/')) || [];
+        if (audioFormats.length > 0) {
+          audioFormats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+          return audioFormats[0].url;
         }
       }
     } catch (_) {}
