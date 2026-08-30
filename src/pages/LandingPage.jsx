@@ -94,13 +94,15 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
               email.split('@')[0],
               PRESET_AVATARS[0].url
             );
-            toast.success("Bienvenue sur E-GE Vinyl !");
+            toast.success("Bienvenue sur E-GE Vinyl !", { duration: 3000 });
             if (onLoginSuccess) onLoginSuccess();
             return;
           }
           throw error;
         }
-        toast.success("Heureux de vous revoir sur E-GE Vinyl !");
+        setTimeout(() => {
+          toast.success("Heureux de vous revoir sur E-GE Vinyl !");
+        }, 2000);
         if (onLoginSuccess) onLoginSuccess();
       } else {
         const finalFullName = (fullName && fullName.trim()) ? fullName.trim() : ((username && username.trim()) ? username.trim() : email.split('@')[0]);
@@ -122,7 +124,9 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
             finalFullName,
             finalAvatar
           );
-          toast.success("Votre compte a été configuré avec succès ! Bienvenue.");
+          setTimeout(() => {
+            toast.success("Votre compte a été configuré avec succès ! Bienvenue.");
+          }, 2000);
           if (onLoginSuccess) onLoginSuccess();
           return;
         }
@@ -148,7 +152,9 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
           );
         }
 
-        toast.success("Votre compte a été configuré avec succès ! Bienvenue.");
+        setTimeout(() => {
+          toast.success("Votre compte a été configuré avec succès ! Bienvenue.");
+        }, 2000);
         if (onLoginSuccess) onLoginSuccess();
       }
     } catch (error) {
@@ -160,7 +166,9 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
 
   const handleGuestLogin = () => {
     signInAsGuest();
-    toast.success("Bienvenue ! Entrée en mode Invité.");
+    setTimeout(() => {
+      toast.success("Bienvenue ! Entrée en mode Invité.");
+    }, 2000);
     if (onLoginSuccess) onLoginSuccess();
   };
 

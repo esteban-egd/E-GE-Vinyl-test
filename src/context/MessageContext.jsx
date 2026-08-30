@@ -6,7 +6,7 @@ export const MessageProvider = ({ children }) => {
   const [messageData, setMessageData] = useState({ text: '', icon: '', visible: false });
   const timeoutRef = useRef(null);
 
-  const showMessage = useCallback((text, icon = '✨', duration = 5000) => {
+  const showMessage = useCallback((text, icon = '✨', duration = 3000) => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }

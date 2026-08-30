@@ -140,6 +140,7 @@ export function useAudioPlayer() {
   const handleTrackEndedRef = useRef(null);
   const playRequestIdRef = useRef(0);
   const fadeIntervalRef = useRef(null);
+  const isUserActionRef = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -348,6 +349,8 @@ export function useAudioPlayer() {
       }
       
       el.preload = 'auto';
+      el.autoplay = true;
+      el.controls = false;
       el.playsInline = true;
       el.setAttribute('playsinline', '');
       if ('preservesPitch' in el) {
@@ -442,6 +445,11 @@ export function useAudioPlayer() {
         setIsPlaying(false);
         if ('mediaSession' in navigator) {
           navigator.mediaSession.playbackState = "paused";
+        }
+        // Auto-resume if pause was not initiated by the user (iOS background suspension prevention)
+        if (!isUserActionRef.current && isMobileDevice()) {
+          console.log('[AudioEngine] Unintended pause detected (likely OS suspension). Attempting auto-resume...');
+          audio.play().catch(() => {});
         }
       }
     };
@@ -607,6 +615,7 @@ export function useAudioPlayer() {
   }, []);
 
   const pause = useCallback(() => {
+    isUserActionRef.current = true;
     setIsPlaying(false);
     
     if (fadeIntervalRef.current) {
@@ -717,6 +726,7 @@ export function useAudioPlayer() {
 
   const resume = useCallback(() => {
     if (!currentTrack) return;
+    isUserActionRef.current = false;
     setIsPlaying(true);
     
     if (fadeIntervalRef.current) {
@@ -810,8 +820,14 @@ export function useAudioPlayer() {
   const play = useCallback((rawTrack) => {
     if (!rawTrack) return;
 
+    isUserActionRef.current = false;
     playRequestIdRef.current++;
     const currentRequestId = playRequestIdRef.current;
+
+    // Claim the audio channel synchronously for iOS
+    if (audioRef.current && isMobileDevice()) {
+      audioRef.current.play().catch(() => {});
+    }
 
     let validYtId = extractYouTubeId(rawTrack.videoId || rawTrack.ytVideoId || rawTrack.id || '');
     if (!/^[a-zA-Z0-9_-]{11}$/.test(validYtId)) {
@@ -970,7 +986,46 @@ export function useAudioPlayer() {
         return;
       }
 
-      // --- STANDARD ONLINE STREAMING VIA YOUTUBE IFRAME ---
+      // --- STANDARD ONLINE STREAMING ---
+      activeEngineRef.current = 'audio';
+      try {
+        const streamUrl = await getLyraAudioStream(
+          trackMeta.videoId || trackMeta.id,
+          trackMeta.title,
+          trackMeta.artist,
+          trackMeta.duration
+        );
+
+        if (currentRequestId !== playRequestIdRef.current) return;
+
+        if (streamUrl && audioRef.current) {
+          let finalUrl = streamUrl;
+
+          // On iOS, fetching as Blob and using createObjectURL creates a "local priority" stream
+          if (isMobileDevice() && !streamUrl.startsWith('blob:') && !streamUrl.startsWith('data:')) {
+            try {
+              console.log('[AudioEngine] iOS detected: Fetching track as Blob for background priority...');
+              const response = await fetch(streamUrl);
+              const blob = await response.blob();
+              finalUrl = URL.createObjectURL(blob);
+            } catch (fetchErr) {
+              console.warn('[AudioEngine] Blob fetch failed, falling back to direct URL:', fetchErr);
+            }
+          }
+
+          audioRef.current.src = finalUrl;
+          audioRef.current.volume = volume;
+          await audioRef.current.play();
+          setIsPlaying(true);
+          setIsLoading(false);
+          setError(null);
+          return;
+        }
+      } catch (streamErr) {
+        console.warn('[AudioEngine] Streaming failed, trying iframe fallback...', streamErr);
+      }
+
+      // --- FALLBACK TO YOUTUBE IFRAME ---
       activeEngineRef.current = 'iframe';
       const player = iframePlayerRef.current;
 

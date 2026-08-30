@@ -36,18 +36,19 @@ export default function MessageLogic() {
       const userName = (!isGuest && user) ? userTitle : "Invité";
       
       if (isGuest) {
-        // Slight delay for smoother UX on startup
+        // Slight delay for smoother UX on startup - 2s as requested
         setTimeout(() => {
           showMessage(`Bienvenue en Mode Démo ! Explorez nos mixes et notre catalogue.`, '👋', 6000);
-        }, 1200);
+        }, 2000);
       } else {
         const hour = new Date().getHours();
         let greeting = 'Bonjour';
         if (hour >= 18 || hour < 4) greeting = 'Bonsoir';
 
+        // 2s delay as requested
         setTimeout(() => {
           showMessage(`${greeting} ${userName} ! Ravi de te revoir sur E-GE VINYL 🎵`, '✨', 5000);
-        }, 1200);
+        }, 2000);
       }
     }
     prevUserRef.current = user;

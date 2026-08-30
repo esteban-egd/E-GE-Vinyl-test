@@ -88,10 +88,39 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Audio API download requests
+  // Audio API download requests - Using ReadableStream to keep iOS background process alive
   if (url.pathname.startsWith('/api/audio-download') || url.pathname.startsWith('/api/stream')) {
     event.respondWith(
-      fetch(request).catch(async () => {
+      fetch(request).then(response => {
+        if (!response.body) return response;
+        
+        // Wrap in a ReadableStream to signal iOS Safari that media is actively streaming
+        const stream = new ReadableStream({
+          start(controller) {
+            const reader = response.body.getReader();
+            function push() {
+              reader.read().then(({ done, value }) => {
+                if (done) {
+                  controller.close();
+                  return;
+                }
+                controller.enqueue(value);
+                push();
+              }).catch(err => {
+                console.error('[SW] Stream error:', err);
+                controller.error(err);
+              });
+            }
+            push();
+          }
+        });
+
+        return new Response(stream, {
+          headers: response.headers,
+          status: response.status,
+          statusText: response.statusText,
+        });
+      }).catch(async () => {
         const id = url.searchParams.get('id') || url.searchParams.get('videoId');
         if (id) {
           const cache = await caches.open(AUDIO_CACHE_NAME);

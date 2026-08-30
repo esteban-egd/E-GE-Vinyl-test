@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import toast, { Toaster } from 'react-hot-toast';
+import toast, { Toaster, useToasterStore } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
 import { AudioProvider, useAudio } from './context/AudioContext';
 import { SearchProvider } from './context/SearchContext';
@@ -72,10 +72,15 @@ function AppContent() {
   // Handler for entering guest mode with mock vinyls preload
   const handleEnterGuestMode = () => {
     signInAsGuest();
-    toast.success("Bienvenue ! Mode Invité & Démo activé.", {
-      icon: '✨',
-      duration: 4000
-    });
+    
+    // Delayed welcome toast to avoid collision with system messages
+    setTimeout(() => {
+      toast.success("Bienvenue ! Mode Invité & Démo activé.", {
+        icon: '✨',
+        duration: 4000
+      });
+    }, 2000);
+
     // If no track is playing yet, pre-load mock vinyls queue so the turntable is ready to spin immediately
     if (!currentTrack && MOCK_VINYLS && MOCK_VINYLS.length > 0) {
       setTimeout(() => {
@@ -193,19 +198,56 @@ function AppProvidersWithAuth({ children }) {
   );
 }
 
+// Toaster Management to limit visible toasts on mobile
+function ToastManager() {
+  const { toasts } = useToasterStore();
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
+  useEffect(() => {
+    if (!isMobile) return;
+    
+    // Limit to 1 active toast at a time on mobile
+    toasts
+      .filter((t) => t.visible)
+      .filter((_, i) => i >= 1)
+      .forEach((t) => toast.dismiss(t.id));
+  }, [toasts, isMobile]);
+
+  return null;
+}
+
 function App() {
   return (
     <AuthProvider>
       <ThemeProvider>
         <AppProvidersWithAuth>
-          <Toaster position="top-center" toastOptions={{
-            style: {
-              background: '#1c1815',
-              color: '#e6dfd5',
-              borderRadius: '12px',
-              border: '1px solid #302116',
-            }
-          }} />
+          <ToastManager />
+          <Toaster 
+            position="top-center" 
+            containerStyle={{
+              top: 'calc(env(safe-area-inset-top) + 20px)',
+              bottom: 'calc(env(safe-area-inset-bottom) + 80px)',
+              zIndex: 99999
+            }}
+            toastOptions={{
+              duration: 3000,
+              style: {
+                background: '#1c1815',
+                color: '#e6dfd5',
+                borderRadius: '12px',
+                border: '1px solid #302116',
+                boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
+                fontSize: '14px',
+                maxWidth: '90vw'
+              },
+              success: {
+                iconTheme: {
+                  primary: '#c29e5a',
+                  secondary: '#1c1815',
+                },
+              },
+            }} 
+          />
           <ShareTrackModal />
           <Router>
             <AppContent />
