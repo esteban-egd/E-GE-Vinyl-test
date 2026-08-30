@@ -36,6 +36,9 @@ let vinylCrackleSource = null;
 let vinylHumSource = null;
 let vinylGainNode = null;
 let analyserNode = null;
+let keepAliveOsc = null;
+let keepAliveGain = null;
+let mediaElementSource = null;
 
 function startVinylNoise(volumeValue) {
   if (isMobileDevice()) return;
@@ -252,6 +255,44 @@ export function useAudioPlayer() {
 
     const unlockAudio = () => {
       const audio = document.getElementById('global-player') || audioRef.current;
+      
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+          if (!vinylAudioContext) {
+            vinylAudioContext = new AudioContextClass();
+          }
+          
+          if (vinylAudioContext.state === 'suspended') {
+            vinylAudioContext.resume();
+          }
+
+          // Create Keep-Alive Oscillator (Inaudible)
+          if (!keepAliveOsc && vinylAudioContext) {
+            keepAliveOsc = vinylAudioContext.createOscillator();
+            keepAliveGain = vinylAudioContext.createGain();
+            keepAliveGain.gain.value = 0.001; // Inaudible
+            keepAliveOsc.connect(keepAliveGain);
+            keepAliveGain.connect(vinylAudioContext.destination);
+            keepAliveOsc.start();
+            console.log('[AudioEngine] Web Audio Keep-Alive activated');
+          }
+
+          // Connect main audio element to the AudioContext
+          if (audio && !mediaElementSource && vinylAudioContext) {
+            try {
+              mediaElementSource = vinylAudioContext.createMediaElementSource(audio);
+              mediaElementSource.connect(vinylAudioContext.destination);
+              console.log('[AudioEngine] MediaElementSource connected to AudioContext');
+            } catch (e) {
+              console.warn('[AudioEngine] Failed to connect MediaElementSource:', e);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[AudioEngine] Failed to initialize Web Audio:', err);
+      }
+
       if (audio) {
         if (!audio.src || audio.src === '' || audio.src.includes('data:audio/wav')) {
           audio.src = SILENT_AUDIO_URI;
@@ -260,21 +301,12 @@ export function useAudioPlayer() {
           audio.play().catch(() => {});
         }
       }
+      
       if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
         try {
           navigator.audioSession.type = 'playback';
         } catch {}
       }
-      if (isMobileDevice()) return;
-      try {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (AudioContextClass && !vinylAudioContext) {
-          vinylAudioContext = new AudioContextClass();
-        }
-        if (vinylAudioContext && vinylAudioContext.state === 'suspended') {
-          vinylAudioContext.resume();
-        }
-      } catch {}
     };
 
     window.addEventListener('touchstart', unlockAudio, { passive: true, once: true });
@@ -729,6 +761,10 @@ export function useAudioPlayer() {
     isUserActionRef.current = false;
     setIsPlaying(true);
     
+    if (vinylAudioContext && vinylAudioContext.state === 'suspended') {
+      vinylAudioContext.resume().catch(() => {});
+    }
+
     if (fadeIntervalRef.current) {
       clearInterval(fadeIntervalRef.current);
       fadeIntervalRef.current = null;
@@ -823,6 +859,10 @@ export function useAudioPlayer() {
     isUserActionRef.current = false;
     playRequestIdRef.current++;
     const currentRequestId = playRequestIdRef.current;
+
+    if (vinylAudioContext && vinylAudioContext.state === 'suspended') {
+      vinylAudioContext.resume().catch(() => {});
+    }
 
     // Claim the audio channel synchronously for iOS
     if (audioRef.current && isMobileDevice()) {
