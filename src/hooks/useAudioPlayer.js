@@ -345,21 +345,24 @@ export function useAudioPlayer() {
         el.preservesPitch = true;
       }
 
-      if (!el.__webAudioProcessed) {
+      if (!el.__webAudioProcessed && !isMobileDevice()) {
         try {
           const AudioContextClass = window.AudioContext || window.webkitAudioContext;
           if (AudioContextClass) {
             const ctx = new AudioContextClass();
             const source = ctx.createMediaElementSource(el);
-            const compressor = ctx.createDynamicsCompressor();
-            
-            compressor.threshold.value = -24;
-            compressor.knee.value = 30;
-            compressor.ratio.value = 12;
-            compressor.attack.value = 0.003;
-            compressor.release.value = 0.25;
+            const gainNode = ctx.createGain();
+            gainNode.gain.value = 1.35; // Pre-amplifier boost (135% for headset clarity & loudness)
 
-            source.connect(compressor);
+            const compressor = ctx.createDynamicsCompressor();
+            compressor.threshold.value = -20;
+            compressor.knee.value = 20;
+            compressor.ratio.value = 8;
+            compressor.attack.value = 0.002;
+            compressor.release.value = 0.2;
+
+            source.connect(gainNode);
+            gainNode.connect(compressor);
             compressor.connect(ctx.destination);
             
             el.__webAudioProcessed = true;
