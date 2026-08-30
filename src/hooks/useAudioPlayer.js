@@ -250,10 +250,19 @@ export function useAudioPlayer() {
     }
 
     const unlockAudio = () => {
-      const audio = document.getElementById('global-player');
-      if (audio && !audio.src) {
-        audio.src = SILENT_AUDIO_URI;
-        audio.play().then(() => audio.pause()).catch(() => {});
+      const audio = document.getElementById('global-player') || audioRef.current;
+      if (audio) {
+        if (!audio.src || audio.src === '' || audio.src.includes('data:audio/wav')) {
+          audio.src = SILENT_AUDIO_URI;
+          audio.loop = true;
+          audio.volume = 0.01;
+          audio.play().catch(() => {});
+        }
+      }
+      if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
+        try {
+          navigator.audioSession.type = 'playback';
+        } catch {}
       }
       if (isMobileDevice()) return;
       try {
@@ -830,13 +839,11 @@ export function useAudioPlayer() {
     setCurrentTrack(trackMeta);
     updateMediaSessionMetadata(trackMeta);
 
-    // Stop HTML5 audio element if playing
+    // Stop HTML5 audio element if playing (reuse audio channel without destroying/clearing src on iOS)
     if (audioRef.current) {
       try {
         audioRef.current.pause();
-        audioRef.current.removeAttribute('src');
-        audioRef.current.src = '';
-        audioRef.current.load();
+        audioRef.current.loop = false;
         audioRef.current.currentTime = 0;
       } catch (_) {}
     }

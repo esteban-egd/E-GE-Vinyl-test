@@ -136,6 +136,7 @@ function AppContent() {
         <audio
           id="global-player"
           playsInline
+          webkit-playsinline="true"
           preload="auto"
           className="hidden"
         />
