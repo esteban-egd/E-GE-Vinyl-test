@@ -126,7 +126,7 @@ function AppContent() {
     : "pb-24 md:pb-6";
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-[var(--color-canvas)] text-[var(--color-charcoal)] font-sans flex-col">
+    <div className="flex h-dvh w-full overflow-hidden bg-[var(--color-canvas)] text-[var(--color-charcoal)] font-sans flex-col pt-[env(safe-area-inset-top)]">
       <MessageLogic />
       <ContextBanner />
       <OfflineNotice />
