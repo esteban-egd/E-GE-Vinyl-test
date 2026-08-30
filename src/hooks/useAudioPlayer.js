@@ -714,6 +714,24 @@ export function useAudioPlayer() {
       clearInterval(fadeIntervalRef.current);
       fadeIntervalRef.current = null;
     }
+
+    if (isMobileDevice()) {
+      if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
+        try { navigator.audioSession.type = 'playback'; } catch {}
+      }
+      if (activeEngineRef.current === 'audio' && audioRef.current) {
+        audioRef.current.volume = 1.0;
+        audioRef.current.muted = false;
+        audioRef.current.play().catch(() => {});
+      } else if (activeEngineRef.current === 'iframe' && iframePlayerRef.current) {
+        try {
+          if (typeof iframePlayerRef.current.unMute === 'function') iframePlayerRef.current.unMute();
+          if (typeof iframePlayerRef.current.setVolume === 'function') iframePlayerRef.current.setVolume(100);
+          if (typeof iframePlayerRef.current.playVideo === 'function') iframePlayerRef.current.playVideo();
+        } catch {}
+      }
+      return;
+    }
     
     let currentVol = 0;
     if (iframePlayerRef.current?.setVolume) {
