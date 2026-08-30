@@ -26,6 +26,11 @@ export function isNativeEnvironment() {
   return isElectron || isCapacitor || isCordova || isTauri || isAndroidApp || isLocalFile || isLocalhost || isPreviewOrDev;
 }
 
+function isMobileDevice() {
+  if (typeof window === 'undefined') return false;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || isNativeEnvironment();
+}
+
 let vinylAudioContext = null;
 let vinylCrackleSource = null;
 let vinylHumSource = null;
@@ -33,6 +38,7 @@ let vinylGainNode = null;
 let analyserNode = null;
 
 function startVinylNoise(volumeValue) {
+  if (isMobileDevice()) return;
   try {
     if (typeof window === 'undefined') return;
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -249,6 +255,7 @@ export function useAudioPlayer() {
         audio.src = SILENT_AUDIO_URI;
         audio.play().then(() => audio.pause()).catch(() => {});
       }
+      if (isMobileDevice()) return;
       try {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         if (AudioContextClass && !vinylAudioContext) {
@@ -413,11 +420,17 @@ export function useAudioPlayer() {
         if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration) && audio.duration > 0) {
           setDuration(audio.duration);
         }
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = "playing";
+        }
       }
     };
     const onPause = () => {
       if (activeEngineRef.current === 'audio') {
         setIsPlaying(false);
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = "paused";
+        }
       }
     };
     const onWaiting = () => {
@@ -563,8 +576,14 @@ export function useAudioPlayer() {
 
     try {
       const session = navigator.mediaSession;
-      session.setActionHandler('play', () => actionsRef.current.resume?.());
-      session.setActionHandler('pause', () => actionsRef.current.pause?.());
+      session.setActionHandler('play', () => {
+        if (audioRef.current) audioRef.current.play().catch(() => {});
+        actionsRef.current.resume?.();
+      });
+      session.setActionHandler('pause', () => {
+        if (audioRef.current) audioRef.current.pause();
+        actionsRef.current.pause?.();
+      });
       session.setActionHandler('nexttrack', () => actionsRef.current.next?.());
       session.setActionHandler('previoustrack', () => actionsRef.current.prev?.());
       session.setActionHandler('seekto', (details) => {
