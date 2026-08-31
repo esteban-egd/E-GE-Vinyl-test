@@ -628,6 +628,18 @@ if (!supabaseInstance) {
       },
       async then(onfulfilled) {
         const result = await executeMockQuery(query);
+        
+        // Broadcast change for mock real-time
+        if (query.operation !== 'select' && typeof window !== 'undefined' && window.BroadcastChannel) {
+          const bc = new BroadcastChannel('supabase_mock_realtime');
+          bc.postMessage({
+            table: query.table,
+            event: query.operation.toUpperCase(),
+            new: Array.isArray(result.data) ? result.data[0] : result.data
+          });
+          bc.close();
+        }
+
         return onfulfilled ? onfulfilled(result) : result;
       }
     };
@@ -675,6 +687,38 @@ if (!supabaseInstance) {
     },
     from(tableName) {
       return createQueryBuilder(tableName);
+    },
+    channel(name) {
+      const listeners = [];
+      let bc = null;
+      if (typeof window !== 'undefined' && window.BroadcastChannel) {
+        bc = new BroadcastChannel('supabase_mock_realtime');
+        bc.onmessage = (event) => {
+          const { table, event: type, new: newRow } = event.data;
+          listeners.forEach(l => {
+            if (l.config.table === table && (l.config.event === '*' || l.config.event === type)) {
+              l.callback({ new: newRow, eventType: type });
+            }
+          });
+        };
+      }
+
+      const channelObj = {
+        on(type, config, callback) {
+          listeners.push({ type, config, callback });
+          return channelObj;
+        },
+        subscribe() {
+          return channelObj;
+        },
+        unsubscribe() {
+          if (bc) bc.close();
+        }
+      };
+      return channelObj;
+    },
+    removeChannel(channel) {
+      if (channel && channel.unsubscribe) channel.unsubscribe();
     }
   };
 }

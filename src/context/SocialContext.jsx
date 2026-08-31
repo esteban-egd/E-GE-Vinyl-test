@@ -44,6 +44,7 @@ export const SocialProvider = ({ children }) => {
   });
 
   const notifiedLoginRef = useRef(null);
+  const processedEventIds = useRef(new Set());
 
   // Save Privacy Settings locally
   useEffect(() => {
@@ -51,6 +52,15 @@ export const SocialProvider = ({ children }) => {
       localStorage.setItem('ege_social_privacy', JSON.stringify(privacySettings));
     } catch (_) {}
   }, [privacySettings]);
+
+  // Trigger haptic feedback if available
+  const triggerHaptic = useCallback(() => {
+    if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
+      try {
+        window.navigator.vibrate([100, 50, 100]);
+      } catch (_) {}
+    }
+  }, []);
 
   // Load Social Data from DB (friendships, profiles, shared_tracks)
   const loadSocialData = useCallback(async () => {
@@ -224,13 +234,36 @@ export const SocialProvider = ({ children }) => {
       if (receivedCount > 0 && notifiedLoginRef.current !== currentUserId) {
         notifiedLoginRef.current = currentUserId;
         setTimeout(() => {
-          toast(`📬 Vous avez reçu ${receivedCount} nouveau(x) morceau(x) de musique !`, { duration: 6000 });
+          toast(`📬 Vous avez reçu ${receivedCount} nouveau(x) morceau(x) de musique !`, { 
+            duration: 6000,
+            icon: '🎵',
+            position: 'top-center'
+          });
+          triggerHaptic();
         }, 1400);
       }
     } catch (err) {
       console.warn("Erreur chargement données sociales:", err);
     }
-  }, [user]);
+  }, [user, triggerHaptic, profile]);
+
+  // Accept Friend Request in DB
+  const acceptFriendRequest = useCallback(async (requestId) => {
+    try {
+      const { error } = await supabase
+        .from('friendships')
+        .update({ status: 'accepted' })
+        .eq('id', requestId);
+
+      if (error) throw error;
+
+      await loadSocialData();
+      toast.success("Demande d'ami acceptée !");
+    } catch (err) {
+      console.error("Erreur acceptation demande:", err);
+      toast.error("Erreur lors de l'acceptation.");
+    }
+  }, [loadSocialData]);
 
   useEffect(() => {
     loadSocialData();
@@ -245,7 +278,7 @@ export const SocialProvider = ({ children }) => {
     }, 60000); // Every minute
 
     // Supabase Realtime listener for live friend requests and shared tracks
-    const channelName = `social-realtime-${currentUserId}-${Date.now()}`;
+    const channelName = `social-realtime-${currentUserId}`;
     const channel = supabase.channel(channelName)
       .on('postgres_changes', {
         event: 'INSERT',
@@ -253,6 +286,9 @@ export const SocialProvider = ({ children }) => {
         table: 'friendships'
       }, async (payload) => {
         const newRow = payload.new;
+        if (processedEventIds.current.has(newRow.id)) return;
+        processedEventIds.current.add(newRow.id);
+
         const recId = newRow.receiver_id || newRow.friend_id;
         const sendId = newRow.sender_id || newRow.user_id;
 
@@ -267,36 +303,39 @@ export const SocialProvider = ({ children }) => {
           } catch (_) {}
 
           // Toast banner for incoming friend request
+          triggerHaptic();
           toast((t) => (
             <div className="flex items-center justify-between gap-3 min-w-[280px]">
               <div className="flex flex-col text-xs">
-                <span className="font-bold text-white flex items-center gap-1.5">
-                  📩 Demande d'ami reçue !
+                <span className="font-bold text-white flex items-center gap-1.5 uppercase tracking-tighter">
+                  📩 Demande d'ami
                 </span>
-                <span className="text-neutral-300 mt-0.5">
-                  <strong>{senderName}</strong> vous a envoyé une demande d'ami.
+                <span className="text-neutral-400 mt-0.5">
+                  <strong>{senderName}</strong> veut devenir votre ami.
                 </span>
               </div>
-              <button
-                onClick={async () => {
-                  toast.dismiss(t.id);
-                  await acceptFriendRequest(newRow.id);
-                }}
-                className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-[11px] uppercase tracking-wider shrink-0 shadow-md cursor-pointer transition-all"
-              >
-                Accepter
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    toast.dismiss(t.id);
+                    await acceptFriendRequest(newRow.id);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-[10px] uppercase tracking-wider shrink-0 shadow-lg cursor-pointer transition-all active:scale-95"
+                >
+                  Accepter
+                </button>
+              </div>
             </div>
           ), {
-            duration: 8000,
-            position: 'top-right',
+            duration: 10000,
+            position: 'top-center',
             style: {
-              background: '#171717',
+              background: '#0a0a0a',
               color: '#fff',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              borderRadius: '16px',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '20px',
               padding: '12px 16px',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)'
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)'
             }
           });
 
@@ -315,17 +354,11 @@ export const SocialProvider = ({ children }) => {
         const sendId = row.sender_id || row.user_id;
         if (sendId === currentUserId || recId === currentUserId) {
           if (row.status === 'accepted' && sendId === currentUserId) {
-            toast.success("Votre demande d'ami a été acceptée ! 🎉");
+            triggerHaptic();
+            toast.success("Votre demande d'ami a été acceptée ! 🎉", { position: 'top-center' });
           }
           loadSocialData();
         }
-      })
-      .on('postgres_changes', {
-        event: 'DELETE',
-        schema: 'public',
-        table: 'friendships'
-      }, () => {
-        loadSocialData();
       })
       .on('postgres_changes', {
         event: 'INSERT',
@@ -333,12 +366,14 @@ export const SocialProvider = ({ children }) => {
         table: 'shared_tracks'
       }, async (payload) => {
         const newRow = payload.new;
+        if (processedEventIds.current.has(newRow.id)) return;
+        processedEventIds.current.add(newRow.id);
+
         const targetId = newRow.receiver_id || newRow.recipient_id;
         const senderId = newRow.sender_id;
-        if (targetId === currentUserId || senderId === currentUserId) {
-          loadSocialData();
-        }
+        
         if (targetId === currentUserId) {
+          triggerHaptic();
           let senderName = 'Un ami';
           try {
             const { data: senderProf } = await supabase.from('profiles').select('*').eq('id', newRow.sender_id).maybeSingle();
@@ -358,11 +393,11 @@ export const SocialProvider = ({ children }) => {
           toast((t) => (
             <div className="flex items-center justify-between gap-3 min-w-[280px]">
               <div className="flex flex-col text-xs">
-                <span className="font-bold text-white flex items-center gap-1.5">
-                  🎵 Nouveau morceau partagé !
+                <span className="font-bold text-white flex items-center gap-1.5 uppercase tracking-tighter">
+                  🎵 Musique partagée
                 </span>
-                <span className="text-neutral-300 mt-0.5 line-clamp-2">
-                  <strong>{senderName}</strong> vous a partagé le titre <strong>{newRow.title}</strong>
+                <span className="text-neutral-400 mt-0.5 line-clamp-2">
+                  <strong>{senderName}</strong> vous conseille <strong>{newRow.title}</strong>
                 </span>
               </div>
               <button
@@ -370,24 +405,26 @@ export const SocialProvider = ({ children }) => {
                   toast.dismiss(t.id);
                   window.dispatchEvent(new CustomEvent('lyra:play_track', { detail: trackObj }));
                 }}
-                className="px-3 py-1.5 rounded-xl bg-[#c29e5a] hover:bg-[#d6b068] text-black font-extrabold text-[11px] uppercase tracking-wider shrink-0 shadow-md cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-xl bg-[#c29e5a] hover:bg-[#d6b068] text-black font-extrabold text-[10px] uppercase tracking-wider shrink-0 shadow-lg cursor-pointer transition-all active:scale-95"
               >
                 Écouter
               </button>
             </div>
           ), {
-            duration: 8000,
-            position: 'top-right',
+            duration: 10000,
+            position: 'top-center',
             style: {
-              background: '#171717',
+              background: '#0a0a0a',
               color: '#fff',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              borderRadius: '16px',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '20px',
               padding: '12px 16px',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)'
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)'
             }
           });
 
+          loadSocialData();
+        } else if (senderId === currentUserId) {
           loadSocialData();
         }
       })
@@ -397,7 +434,7 @@ export const SocialProvider = ({ children }) => {
       clearInterval(pingInterval);
       supabase.removeChannel(channel);
     };
-  }, [user, loadSocialData]);
+  }, [user, loadSocialData, triggerHaptic, acceptFriendRequest]);
 
   // Multi-criteria real-time user search (full_name, username, email)
   const searchUsers = useCallback(async (query) => {
@@ -485,24 +522,6 @@ export const SocialProvider = ({ children }) => {
     } catch (err) {
       console.error("Détails erreur d'ami:", err);
       toast.error("Erreur lors de l'envoi de la demande d'ami.");
-    }
-  };
-
-  // Accept Friend Request in DB
-  const acceptFriendRequest = async (requestId) => {
-    try {
-      const { error } = await supabase
-        .from('friendships')
-        .update({ status: 'accepted' })
-        .eq('id', requestId);
-
-      if (error) throw error;
-
-      await loadSocialData();
-      toast.success("Demande d'ami acceptée !");
-    } catch (err) {
-      console.error("Erreur acceptation demande:", err);
-      toast.error("Erreur lors de l'acceptation.");
     }
   };
 
