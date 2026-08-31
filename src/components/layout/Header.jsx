@@ -67,15 +67,6 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
       style={{ backgroundColor: currentTheme.bg }}
     >
       <div className="flex items-center gap-3">
-        {/* Mobile Hamburger Menu Toggle */}
-        <button
-          onClick={onOpenMobileMenu}
-          className="md:hidden p-2 rounded-xl text-neutral-400 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/5 transition-all cursor-pointer flex items-center justify-center"
-          aria-label="Ouvrir le menu de navigation"
-        >
-          <Menu size={20} />
-        </button>
-
         <Link to="/" className="flex items-center gap-1.5 md:hidden hover:opacity-80 transition-opacity">
           <span className="text-display text-2xl font-black tracking-tighter uppercase" style={{ color: currentTheme.primary }}>E</span>
           <span className="text-display text-xl font-light tracking-widest text-white uppercase">GE</span>

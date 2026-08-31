@@ -1,11 +1,13 @@
 import { useAudio } from '../../context/AudioContext';
 import { useLikes } from '../../hooks/useLikes';
-import { ListMusic, Trash2, X, Music, Heart } from 'lucide-react';
+import { useSocial } from '../../context/SocialContext';
+import { ListMusic, Trash2, X, Music, Heart, Share2 } from 'lucide-react';
 import TrackImage from '../common/TrackImage';
 
 export default function QueueDrawer({ isOpen, onClose }) {
   const { queue, play, currentTrack, isCurrentTrack, removeFromQueue, clearQueue } = useAudio();
   const { isLiked, toggleLike } = useLikes();
+  const { openShareModal } = useSocial();
 
   if (!isOpen) return null;
 
@@ -106,6 +108,17 @@ export default function QueueDrawer({ isOpen, onClose }) {
                 </div>
 
                 <div className="flex items-center gap-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openShareModal(track);
+                    }}
+                    className="p-1.5 text-gray-500 hover:text-white transition-colors"
+                    title="Partager"
+                  >
+                    <Share2 size={16} />
+                  </button>
+
                   <button
                     onClick={(e) => {
                       e.stopPropagation();

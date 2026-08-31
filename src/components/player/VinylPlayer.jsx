@@ -5,6 +5,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useLyrics } from '../../hooks/useLyrics';
 import { useLikes } from '../../hooks/useLikes';
 import { useOffline } from '../../hooks/useOffline';
+import { useSocial } from '../../context/SocialContext';
 import { getMainArtistName } from '../../services/musicDataService';
 import VinylDisc from './VinylDisc';
 import Tonearm from './Tonearm';
@@ -17,7 +18,7 @@ import MarqueeTitle from '../common/MarqueeTitle';
 import { 
   Disc, Sliders, ToggleLeft, ToggleRight,
   Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, 
-  Heart, Download, Check, Mic2, Loader2, X, Maximize2
+  Heart, Download, Check, Mic2, Loader2, X, Maximize2, Share2
 } from 'lucide-react';
 
 export default function VinylPlayer() {
@@ -54,6 +55,7 @@ export default function VinylPlayer() {
   const { currentTheme } = useTheme();
   const { isLiked, toggleLike } = useLikes();
   const { isDownloaded, downloadTrack, isDownloading, removeTrack } = useOffline();
+  const { openShareModal } = useSocial();
   
   const [mobileTab, setMobileTab] = useState('platine'); // Keeps PC fallback working
   const [pcTab, setPcTab] = useState('lyrics'); // 'lyrics' | 'queue'
@@ -636,6 +638,14 @@ export default function VinylPlayer() {
             </div>
             
             <div className="flex items-center gap-1.5 shrink-0 relative z-50">
+              <button
+                disabled={!currentTrack}
+                onClick={() => openShareModal(currentTrack)}
+                className="p-1.5 rounded-full hover:bg-white/5 transition-all text-gray-400 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                title="Partager"
+              >
+                <Share2 size={18} />
+              </button>
               <button
                 disabled={!currentTrack}
                 onClick={(e) => {
