@@ -8,7 +8,7 @@ import { updateUserStatus } from '../services/userBddService';
 const SocialContext = createContext({});
 
 export const SocialProvider = ({ children }) => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
 
   // 1. Friends State (purged of all mock data)
   const [friends, setFriends] = useState([]);
@@ -66,18 +66,6 @@ export const SocialProvider = ({ children }) => {
       const { data: allProfiles } = await supabase.from('profiles').select('*');
       const profileMap = new Map((allProfiles || []).map(p => [p.id, p]));
 
-      // Also make sure current user profile is in the map if missing
-      if (user && !profileMap.has(user.id)) {
-        const fallbackSelf = {
-          id: user.id,
-          full_name: profile?.full_name || profile?.username || user.user_metadata?.full_name || 'Mon Profil',
-          username: profile?.username || user.user_metadata?.username || 'me',
-          email: user.email || '',
-          avatar_url: profile?.avatar_url || ''
-        };
-        profileMap.set(user.id, fallbackSelf);
-      }
-
       // Fetch friendships where current user is requester or addressee
       const currentUserId = user?.id || user?.uid;
 
@@ -89,6 +77,18 @@ export const SocialProvider = ({ children }) => {
           playlists: myDbProfile.privacy_playlists || 'friends',
           topArtists: myDbProfile.privacy_artists || 'friends'
         });
+      }
+
+      // Also make sure current user profile is in the map if missing
+      if (user && !profileMap.has(user.id)) {
+        const fallbackSelf = {
+          id: user.id,
+          full_name: profile?.full_name || myDbProfile?.full_name || user.user_metadata?.full_name || 'Mon Profil',
+          username: profile?.username || myDbProfile?.username || user.user_metadata?.username || 'me',
+          email: user.email || '',
+          avatar_url: profile?.avatar_url || myDbProfile?.avatar_url || ''
+        };
+        profileMap.set(user.id, fallbackSelf);
       }
 
       const { data: userFriendships } = await supabase

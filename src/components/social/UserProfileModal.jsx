@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  X, Heart, Disc, Sparkles, Send, MessageSquare, Lock, EyeOff, Play, 
-  Search, Check, Music, Radio, Activity, Globe, Users, LockKeyhole, UserPlus
+  X, Heart, Disc, Sparkles, Send, Lock, Play, 
+  Search, Check, Music, Radio, Activity, Globe, Users, UserPlus
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useSocial } from '../../context/SocialContext';
@@ -37,37 +37,45 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const [sending, setSending] = useState(false);
 
   // Robust ID extraction
-  const getUserId = (obj) => {
+  const getUserId = React.useCallback((obj) => {
     if (!obj) return null;
-    // Special handling for friend relationship objects (they have a .friend profile)
-    if (obj.friend && (obj.friend.id || obj.friend.uid)) return obj.friend.id || obj.friend.uid;
-    // Otherwise return the direct ID
-    return obj.id || obj.uid || obj.user_id || obj.friend_id || obj.sender_id || obj.receiver_id;
-  };
+    const currentId = user?.id || user?.uid;
+    
+    // 1. If it's a friendship relationship object from SocialContext
+    // This handles both old and new column naming
+    const uIdRaw = obj.user_id || obj.sender_id;
+    const fIdRaw = obj.friend_id || obj.receiver_id;
+    
+    if (uIdRaw && fIdRaw) {
+      const uId = String(uIdRaw);
+      const fId = String(fIdRaw);
+      const cId = String(currentId);
+      return uId === cId ? fId : uId;
+    }
+    
+    // 2. If it's a nested profile object (SocialContext structure)
+    if (obj.user && (obj.user.id || obj.user.uid)) return String(obj.user.id || obj.user.uid);
+    if (obj.friend && (obj.friend.id || obj.friend.uid)) return String(obj.friend.id || obj.friend.uid);
+    
+    // 3. Direct ID fields
+    const finalId = obj.id || obj.uid || obj.user_id || obj.sender_id || obj.friend_id || obj.receiver_id;
+    return finalId ? String(finalId) : null;
+  }, [user?.id, user?.uid]);
 
-  const targetId = getUserId(friend);
   const currentUserId = user?.id || user?.uid;
+  const targetId = getUserId(friend);
   const isMe = currentUserId && targetId && String(currentUserId) === String(targetId);
 
-  // Determine friendship status
-  const isFriend = isMe || friends.some(f => {
-    // In SocialContext, we fetch friends and store them as relationship rows
-    // The friend's UUID is in f.friend_id (if we are requester) or f.user_id (if we are receiver)
-    // But SocialContext also attaches the profile as .friend
-    const fProfileId = f.friend?.id || f.friend?.uid;
-    const fRelUserId = f.user_id;
-    const fRelFriendId = f.friend_id;
-    
-    const actualFriendId = (String(fRelUserId) === String(currentUserId)) ? fRelFriendId : fRelUserId;
-    
-    return (actualFriendId && String(actualFriendId) === String(targetId)) || 
-           (fProfileId && String(fProfileId) === String(targetId));
-  });
+  // Determine friendship status - friends in context are profile objects
+  const isFriend = isMe || (Array.isArray(friends) && friends.some(f => {
+    const fId = f.id || f.uid;
+    return fId && targetId && String(fId).toLowerCase() === String(targetId).toLowerCase();
+  }));
 
-  const isRequested = !isMe && pendingRequests.some(r => {
-    const rUserId = getUserId(r.user);
-    return rUserId && targetId && String(rUserId) === String(targetId);
-  });
+  const isRequested = !isMe && !isFriend && (Array.isArray(pendingRequests) && pendingRequests.some(r => {
+    const rUserId = r.user?.id || r.user?.uid || r.user_id;
+    return rUserId && targetId && String(rUserId).toLowerCase() === String(targetId).toLowerCase();
+  }));
 
   // Actual profile to use (prefer freshly fetched)
   const activeProfile = profileData || friend;
@@ -84,14 +92,6 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const canSeePlaylists = isMe || privacyPlaylists === 'public' || (privacyPlaylists === 'friends' && isFriend);
   const canSeeTopArtists = isMe || privacyArtists === 'public' || (privacyArtists === 'friends' && isFriend);
 
-  console.log("[UserProfileModal] Évaluation Droits UI:", {
-    targetId,
-    isMe,
-    isFriend,
-    privacyLikes,
-    canSeeLikes
-  });
-
   useEffect(() => {
     if (!friend || !isOpen) {
       setProfileData(null);
@@ -102,164 +102,123 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
     }
 
     const loadFriendProfileData = async () => {
-      if (!isOpen || !friend) return;
-      
-      setLoading(true);
+      // Re-resolve target ID to be absolutely sure
       const currentTargetId = getUserId(friend);
-      const currentUserId = user?.id || user?.uid;
-      const isCurrentlyMe = currentUserId === currentTargetId;
+      if (!currentTargetId) return;
+
+      setLoading(true);
       
-      console.log("[UserProfileModal] Initialisation chargement :", {
-        friend_object: friend,
-        resolved_targetId: currentTargetId,
-        isMe: isCurrentlyMe
-      });
+      // DIAGNOSTIC UTILITY
+      const runFriendshipDiagnostic = async () => {
+        const myId = user?.id || user?.uid;
+        if (!myId || !currentTargetId) return;
+
+        const { data: diagData, error: diagError } = await supabase
+          .from('friendships')
+          .select('*')
+          .or(`and(user_id.eq.${myId},friend_id.eq.${currentTargetId}),and(user_id.eq.${currentTargetId},friend_id.eq.${myId})`);
+
+        console.log("[Friendship Diagnostic] Results:", {
+          myId,
+          targetId: currentTargetId,
+          matchFound: !!diagData?.length,
+          status: diagData?.[0]?.status || 'none',
+          error: diagError ? diagError.message : null,
+          raw: diagData
+        });
+      };
+      
+      runFriendshipDiagnostic();
       
       try {
-        // 0. Fetch latest profile data to get privacy settings and verify ID
-        const { data: latestProfile, error: profileError } = await supabase
+        // 0. Fetch latest profile data to get privacy settings
+        const { data: latestProfile } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', currentTargetId)
           .maybeSingle();
         
-        if (profileError) {
-          console.error("[UserProfileModal] Erreur critique profil:", profileError);
-        }
-
         if (latestProfile) {
-          console.log("[UserProfileModal] Profil frais récupéré :", latestProfile);
           setProfileData(latestProfile);
-        } else {
-          console.warn("[UserProfileModal] Aucun profil trouvé en base pour l'ID:", currentTargetId);
         }
 
-        // Determine permissions with case-insensitivity and defaults
-        const pLikes = (latestProfile?.privacy_likes || friend?.privacy_likes || 'friends').toLowerCase();
-        const pPlaylists = (latestProfile?.privacy_playlists || friend?.privacy_playlists || 'friends').toLowerCase();
-        const pArtists = (latestProfile?.privacy_artists || friend?.privacy_artists || 'friends').toLowerCase();
+        const activeP = latestProfile || friend;
+        const pLikes = (activeP?.privacy_likes || 'friends').toLowerCase();
+        const pPlaylists = (activeP?.privacy_playlists || 'friends').toLowerCase();
+        const pArtists = (activeP?.privacy_artists || 'friends').toLowerCase();
 
-        // Robust friendship check (using current friends state)
-        const isCurrentlyFriend = isCurrentlyMe || friends.some(f => {
-          const fId = getUserId(f);
-          return fId === currentTargetId;
-        });
+        // 1. Re-evaluate visibility with latest data and context
+        const isCurrentlyMe = currentUserId && String(currentUserId).toLowerCase() === String(currentTargetId).toLowerCase();
+        const isCurrentlyFriend = isCurrentlyMe || (Array.isArray(friends) && friends.some(f => {
+          const fId = f.id || f.uid;
+          return fId && String(fId).toLowerCase() === String(currentTargetId).toLowerCase();
+        }));
 
         const canSeeL = isCurrentlyMe || pLikes === 'public' || (pLikes === 'friends' && isCurrentlyFriend);
         const canSeeP = isCurrentlyMe || pPlaylists === 'public' || (pPlaylists === 'friends' && isCurrentlyFriend);
         const canSeeA = isCurrentlyMe || pArtists === 'public' || (pArtists === 'friends' && isCurrentlyFriend);
 
-        console.log("[UserProfileModal] Calcul des droits d'accès :", { 
-          currentTargetId, 
-          isFriend: isCurrentlyFriend, 
-          isMe: isCurrentlyMe,
-          permissions: { likes: canSeeL, playlists: canSeeP, artists: canSeeA },
-          privacy_settings: { likes: pLikes, playlists: pPlaylists, artists: pArtists }
-        });
-
-        let finalLikes = [];
-
-        // 1. Load Liked Tracks if permitted
+        // 2. Load Liked Tracks
         if (canSeeL) {
-          console.log("[UserProfileModal] Tentative de récupération des likes pour:", currentTargetId);
-          const { data: likesData, error: likesError } = await supabase
+          const { data: likesData } = await supabase
             .from('likes')
             .select('*')
             .eq('user_id', currentTargetId)
             .order('created_at', { ascending: false });
 
-          if (likesError) {
-            console.error("[UserProfileModal] ERREUR SUPABASE LIKES:", likesError.code, likesError.message);
-            if (likesError.code === '42501') {
-              console.warn("[UserProfileModal] Manque de permissions RLS sur la table 'likes'");
-            }
-          }
-
-          if (likesData && likesData.length > 0) {
-            console.log(`[UserProfileModal] SUCCESS: ${likesData.length} likes récupérés`);
-            finalLikes = likesData.map(item => ({
+          if (likesData) {
+            setLikedTracks(likesData.map(item => ({
               ...item,
               videoId: item.video_id || item.videoId || item.id,
               id: item.video_id || item.videoId || item.id,
               title: item.title || 'Titre inconnu',
               artist: item.artist || 'Artiste inconnu',
               thumbnail: item.thumbnail || ''
-            }));
-            setLikedTracks(finalLikes);
-          } else {
-            console.log("[UserProfileModal] INFO: Aucun like trouvé ou liste vide");
-            setLikedTracks([]);
+            })));
           }
-        } else {
-          console.log("[UserProfileModal] ACCÈS BLOQUÉ: Confidentialité réglée sur", pLikes, "et isFriend =", isCurrentlyFriend);
-          setLikedTracks([]);
         }
 
-        // 2. Load Playlists if permitted
+        // 3. Load Playlists
         if (canSeeP) {
-          console.log("[UserProfileModal] Tentative de récupération des playlists pour:", currentTargetId);
-          const { data: playlistsData, error: playlistsError } = await supabase
+          const { data: playlistsData } = await supabase
             .from('playlists')
             .select('*')
             .eq('user_id', currentTargetId)
             .order('updated_at', { ascending: false });
-
-          if (playlistsError) {
-            console.error("[UserProfileModal] ERREUR SUPABASE PLAYLISTS:", playlistsError.code, playlistsError.message);
-          }
-
-          if (playlistsData) {
-            console.log(`[UserProfileModal] SUCCESS: ${playlistsData.length} playlists récupérées`);
-            setPlaylists(playlistsData || []);
-          } else {
-            setPlaylists([]);
-          }
-        } else {
-          setPlaylists([]);
+          
+          if (playlistsData) setPlaylists(playlistsData);
         }
 
-        // 3. Load Listening History & Calculate Top Artists
+        // 4. Load Listening History & Top Artists
         if (canSeeA) {
-          console.log("[UserProfileModal] Tentative de récupération de l'historique pour:", currentTargetId);
-          const { data: historyData, error: historyError } = await supabase
+          const { data: historyData } = await supabase
             .from('listening_history')
             .select('*')
             .eq('user_id', currentTargetId)
             .order('played_at', { ascending: false })
-            .limit(40);
-
-          if (historyError) {
-            console.error("[UserProfileModal] ERREUR SUPABASE HISTORY:", historyError.code, historyError.message);
-          }
-
-          let likesForArtists = finalLikes;
-          if (!canSeeL) {
-            const { data: fallbackLikes } = await supabase
-              .from('likes')
-              .select('artist')
-              .eq('user_id', currentTargetId);
-            likesForArtists = fallbackLikes || [];
-          }
+            .limit(50);
 
           const artistCounts = {};
           (historyData || []).forEach(t => {
             const artName = t.artist || t.artist_name;
-            if (artName) {
-              artistCounts[artName] = (artistCounts[artName] || 0) + 1;
-            }
+            if (artName) artistCounts[artName] = (artistCounts[artName] || 0) + 1;
           });
-          likesForArtists.forEach(t => {
-            if (t.artist) {
-              artistCounts[t.artist] = (artistCounts[t.artist] || 0) + 1;
-            }
-          });
+          
+          if (canSeeL) {
+            const { data: likesForArtists } = await supabase
+              .from('likes')
+              .select('artist')
+              .eq('user_id', currentTargetId);
+            (likesForArtists || []).forEach(t => {
+              if (t.artist) artistCounts[t.artist] = (artistCounts[t.artist] || 0) + 1;
+            });
+          }
 
           const sortedArtists = Object.entries(artistCounts)
             .map(([name, count]) => ({ name, count }))
             .sort((a, b) => b.count - a.count)
             .slice(0, 5);
 
-          // Enrichment with artist images
           const enrichedArtists = await Promise.all(sortedArtists.map(async (art) => {
             try {
               const info = await searchOfficialDeezerArtist(art.name);
@@ -267,24 +226,22 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                 ...art, 
                 imageUrl: info?.picture_medium || info?.picture_big || info?.picture || '' 
               };
-            } catch (err) {
+            } catch (_) {
               return { ...art, imageUrl: '' };
             }
           }));
 
           setTopArtists(enrichedArtists);
-        } else {
-          setTopArtists([]);
         }
       } catch (err) {
-        console.warn("[UserProfileModal] Erreur globale chargement:", err);
+        console.warn("[UserProfileModal] Error loading data:", err);
       } finally {
         setLoading(false);
       }
     };
 
     loadFriendProfileData();
-  }, [friend, isOpen, isFriend, friends, user?.id]);
+  }, [friend, isOpen, friends, user?.id, user?.uid, getUserId, currentUserId]);
 
   // Search tracks to share
   const handleTrackSearch = async (e) => {
@@ -306,10 +263,9 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
 
   // Share track
   const handleShareTrack = async () => {
-    if (!selectedTrack) return;
+    if (!selectedTrack || !targetId) return;
     setSending(true);
     try {
-      const targetId = friend.id || friend.uid;
       await shareTrackWithFriend(targetId, selectedTrack, message);
       toast.success(`"${selectedTrack.title}" partagé avec succès !`);
       setSelectedTrack(null);
