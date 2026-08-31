@@ -7,11 +7,14 @@ import {
 import { useTheme } from '../../context/ThemeContext';
 import { useSocial } from '../../context/SocialContext';
 import { useAudio } from '../../context/AudioContext';
+import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
+import { searchOfficialDeezerArtist } from '../../services/artistService';
 import { toast } from 'react-hot-toast';
 
 export default function UserProfileModal({ friend, isOpen, onClose }) {
   const { currentTheme } = useTheme();
+  const { user } = useAuth();
   const { friends, shareTrackWithFriend, sendFriendRequest, pendingRequests } = useSocial();
   const { play } = useAudio();
 
@@ -37,14 +40,16 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const getUserId = (obj) => obj?.id || obj?.uid || obj?.user_id || obj?.friend_id || obj?.sender_id || obj?.receiver_id || obj?.recipient_id;
 
   const targetId = getUserId(friend);
+  const currentUserId = user?.id || user?.uid;
+  const isMe = currentUserId === targetId;
 
   // Determine friendship status
-  const isFriend = friends.some(f => {
+  const isFriend = isMe || friends.some(f => {
     const fId = getUserId(f);
     return fId && targetId && fId === targetId;
   });
 
-  const isRequested = pendingRequests.some(r => {
+  const isRequested = !isMe && pendingRequests.some(r => {
     const rUserId = getUserId(r.user);
     return rUserId && targetId && rUserId === targetId;
   });
@@ -60,9 +65,9 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const privacyPlaylists = (activeProfile?.privacy_playlists || 'friends').toLowerCase();
   const privacyArtists = (activeProfile?.privacy_artists || 'friends').toLowerCase();
 
-  const canSeeLikes = privacyLikes === 'public' || (privacyLikes === 'friends' && isFriend);
-  const canSeePlaylists = privacyPlaylists === 'public' || (privacyPlaylists === 'friends' && isFriend);
-  const canSeeTopArtists = privacyArtists === 'public' || (privacyArtists === 'friends' && isFriend);
+  const canSeeLikes = isMe || privacyLikes === 'public' || (privacyLikes === 'friends' && isFriend);
+  const canSeePlaylists = isMe || privacyPlaylists === 'public' || (privacyPlaylists === 'friends' && isFriend);
+  const canSeeTopArtists = isMe || privacyArtists === 'public' || (privacyArtists === 'friends' && isFriend);
 
   useEffect(() => {
     if (!friend || !isOpen) {
@@ -78,10 +83,13 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
       
       setLoading(true);
       const currentTargetId = getUserId(friend);
+      const currentUserId = user?.id || user?.uid;
+      const isCurrentlyMe = currentUserId === currentTargetId;
       
       console.log("[UserProfileModal] Initialisation chargement :", {
         friend_object: friend,
-        resolved_targetId: currentTargetId
+        resolved_targetId: currentTargetId,
+        isMe: isCurrentlyMe
       });
       
       try {
@@ -109,18 +117,19 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
         const pArtists = (latestProfile?.privacy_artists || friend?.privacy_artists || 'friends').toLowerCase();
 
         // Robust friendship check (using current friends state)
-        const isCurrentlyFriend = friends.some(f => {
+        const isCurrentlyFriend = isCurrentlyMe || friends.some(f => {
           const fId = getUserId(f);
           return fId === currentTargetId;
         });
 
-        const canSeeL = pLikes === 'public' || (pLikes === 'friends' && isCurrentlyFriend);
-        const canSeeP = pPlaylists === 'public' || (pPlaylists === 'friends' && isCurrentlyFriend);
-        const canSeeA = pArtists === 'public' || (pArtists === 'friends' && isCurrentlyFriend);
+        const canSeeL = isCurrentlyMe || pLikes === 'public' || (pLikes === 'friends' && isCurrentlyFriend);
+        const canSeeP = isCurrentlyMe || pPlaylists === 'public' || (pPlaylists === 'friends' && isCurrentlyFriend);
+        const canSeeA = isCurrentlyMe || pArtists === 'public' || (pArtists === 'friends' && isCurrentlyFriend);
 
         console.log("[UserProfileModal] Calcul des droits d'accès :", { 
           currentTargetId, 
           isFriend: isCurrentlyFriend, 
+          isMe: isCurrentlyMe,
           permissions: { likes: canSeeL, playlists: canSeeP, artists: canSeeA },
           privacy_settings: { likes: pLikes, playlists: pPlaylists, artists: pArtists }
         });
@@ -129,7 +138,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
 
         // 1. Load Liked Tracks if permitted
         if (canSeeL) {
-          console.log("[UserProfileModal] Requête des likes pour:", currentTargetId);
+          console.log("[UserProfileModal] Tentative de récupération des likes pour:", currentTargetId);
           const { data: likesData, error: likesError } = await supabase
             .from('likes')
             .select('*')
@@ -137,11 +146,14 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
             .order('created_at', { ascending: false });
 
           if (likesError) {
-            console.error("[UserProfileModal] Erreur requête likes:", likesError);
+            console.error("[UserProfileModal] ERREUR SUPABASE LIKES:", likesError.code, likesError.message);
+            if (likesError.code === '42501') {
+              console.warn("[UserProfileModal] Manque de permissions RLS sur la table 'likes'");
+            }
           }
 
-          if (likesData) {
-            console.log(`[UserProfileModal] Résultat requête likes: ${likesData.length} morceaux`, likesData);
+          if (likesData && likesData.length > 0) {
+            console.log(`[UserProfileModal] SUCCESS: ${likesData.length} likes récupérés`);
             finalLikes = likesData.map(item => ({
               ...item,
               videoId: item.video_id || item.videoId || item.id,
@@ -152,22 +164,29 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
             }));
             setLikedTracks(finalLikes);
           } else {
+            console.log("[UserProfileModal] INFO: Aucun like trouvé ou liste vide");
             setLikedTracks([]);
           }
         } else {
-          console.log("[UserProfileModal] Accès REFUSÉ aux likes (Confidentialité ou Amitié manquante)");
+          console.log("[UserProfileModal] ACCÈS BLOQUÉ: Confidentialité réglée sur", pLikes, "et isFriend =", isCurrentlyFriend);
           setLikedTracks([]);
         }
 
         // 2. Load Playlists if permitted
         if (canSeeP) {
+          console.log("[UserProfileModal] Tentative de récupération des playlists pour:", currentTargetId);
           const { data: playlistsData, error: playlistsError } = await supabase
             .from('playlists')
             .select('*')
             .eq('user_id', currentTargetId)
             .order('updated_at', { ascending: false });
 
-          if (!playlistsError && playlistsData) {
+          if (playlistsError) {
+            console.error("[UserProfileModal] ERREUR SUPABASE PLAYLISTS:", playlistsError.code, playlistsError.message);
+          }
+
+          if (playlistsData) {
+            console.log(`[UserProfileModal] SUCCESS: ${playlistsData.length} playlists récupérées`);
             setPlaylists(playlistsData || []);
           } else {
             setPlaylists([]);
@@ -178,12 +197,17 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
 
         // 3. Load Listening History & Calculate Top Artists
         if (canSeeA) {
-          const { data: historyData } = await supabase
+          console.log("[UserProfileModal] Tentative de récupération de l'historique pour:", currentTargetId);
+          const { data: historyData, error: historyError } = await supabase
             .from('listening_history')
             .select('*')
             .eq('user_id', currentTargetId)
             .order('played_at', { ascending: false })
             .limit(40);
+
+          if (historyError) {
+            console.error("[UserProfileModal] ERREUR SUPABASE HISTORY:", historyError.code, historyError.message);
+          }
 
           let likesForArtists = finalLikes;
           if (!canSeeL) {
@@ -212,7 +236,20 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
             .sort((a, b) => b.count - a.count)
             .slice(0, 5);
 
-          setTopArtists(sortedArtists);
+          // Enrichment with artist images
+          const enrichedArtists = await Promise.all(sortedArtists.map(async (art) => {
+            try {
+              const info = await searchOfficialDeezerArtist(art.name);
+              return { 
+                ...art, 
+                imageUrl: info?.picture_medium || info?.picture_big || info?.picture || '' 
+              };
+            } catch (err) {
+              return { ...art, imageUrl: '' };
+            }
+          }));
+
+          setTopArtists(enrichedArtists);
         } else {
           setTopArtists([]);
         }
@@ -224,7 +261,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
     };
 
     loadFriendProfileData();
-  }, [friend, isOpen, isFriend]);
+  }, [friend, isOpen, isFriend, friends, user?.id]);
 
   // Search tracks to share
   const handleTrackSearch = async (e) => {
@@ -280,7 +317,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+      <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -300,7 +337,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
 
           <div className="flex-1 overflow-y-auto no-scrollbar">
             {/* Header section */}
-            <div className="p-6 md:p-8 border-b border-white/10 bg-gradient-to-b from-white/5 to-transparent relative">
+            <div className="p-6 md:p-10 border-b border-white/10 bg-gradient-to-b from-white/10 to-transparent relative">
             <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
               <div className="relative">
                 <img 
@@ -332,7 +369,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-xs mt-1">
                   <span className="flex items-center gap-1.5 text-gray-400">
                     <Activity size={13} style={{ color: currentTheme.primary }} />
-                    <span className="capitalize">{displayUser.status === 'listening' ? 'En écoute' : displayUser.status === 'online' ? 'En ligne' : 'Hors-ligne'}</span>
+                    <span className="capitalize">{displayUser.status === 'listening' ? 'En écoute' : displayUser.status === 'online' ? 'En ligne' : 'Inactif'}</span>
                   </span>
                   
                   {displayUser.current_track && (
@@ -637,8 +674,16 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                             className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5"
                           >
                             <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white text-xs font-black border border-white/15">
+                              <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white text-xs font-black border border-white/15 overflow-hidden relative">
                                 <span>{artist.name.charAt(0)}</span>
+                                {artist.imageUrl && (
+                                  <img 
+                                    src={artist.imageUrl} 
+                                    alt={artist.name} 
+                                    className="absolute inset-0 w-full h-full object-cover z-10"
+                                    onError={(e) => { e.target.style.display = 'none'; }}
+                                  />
+                                )}
                               </div>
                               <h4 className="text-xs font-bold text-white">{artist.name}</h4>
                             </div>

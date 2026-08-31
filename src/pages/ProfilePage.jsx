@@ -20,6 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import db from '../lib/db';
 import { fetchListeningHistory } from '../services/userBddService';
+import { searchOfficialDeezerArtist } from '../services/artistService';
 
 export default function ProfilePage() {
   const { user, profile, updateProfile, signOut } = useAuth();
@@ -132,7 +133,20 @@ export default function ProfilePage() {
             .sort((a, b) => b.count - a.count)
             .slice(0, 5);
 
-          setTopArtists(sorted);
+          // Fetch images for top artists in parallel
+          const enrichedArtists = await Promise.all(sorted.map(async (art) => {
+            try {
+              const info = await searchOfficialDeezerArtist(art.name);
+              return { 
+                ...art, 
+                imageUrl: info?.picture_medium || info?.picture_big || info?.picture || '' 
+              };
+            } catch (err) {
+              return { ...art, imageUrl: '' };
+            }
+          }));
+
+          setTopArtists(enrichedArtists);
         }
       } catch (err) {
         console.warn('Erreur chargement historique profile:', err);
@@ -429,7 +443,15 @@ export default function ProfilePage() {
                       style={{ borderColor: `${currentTheme.primary}40` }}
                     >
                       <span className="relative z-10">{artist.name.charAt(0)}</span>
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                      {artist.imageUrl && (
+                        <img 
+                          src={artist.imageUrl} 
+                          alt={artist.name} 
+                          className="absolute inset-0 w-full h-full object-cover z-20"
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none z-30" />
                     </div>
                     <h4 className="text-xs font-bold text-white truncate w-full group-hover:underline">
                       {artist.name}
@@ -739,7 +761,7 @@ export default function ProfilePage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Entrez un nom ou @pseudo (ex: @alex_vinyl, Sophie)..."
-                className="w-full pl-11 pr-4 py-3 rounded-2xl bg-black/40 border border-white/10 text-white text-xs outline-none focus:border-white/30 font-medium"
+                className="w-full pl-11 pr-12 py-3 rounded-2xl bg-black/40 border border-white/10 text-white text-xs outline-none focus:border-white/30 font-medium"
               />
               {searchQuery && (
                 <button 
