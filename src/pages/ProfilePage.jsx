@@ -776,12 +776,23 @@ export default function ProfilePage() {
                           className="flex items-center justify-between p-3.5 rounded-2xl bg-black/30 border border-white/5 hover:border-white/20 transition-all"
                         >
                           <div className="flex items-center gap-3 min-w-0">
-                            <img 
-                              src={u.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'} 
-                              alt={u.full_name} 
-                              className="w-10 h-10 rounded-full object-cover border border-white/10 shrink-0"
-                            />
-                            <div className="min-w-0">
+                            <div 
+                              className="relative cursor-pointer group"
+                              onClick={() => setSelectedFriendForModal(u)}
+                            >
+                              <img 
+                                src={u.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'} 
+                                alt={u.full_name} 
+                                className="w-10 h-10 rounded-full object-cover border border-white/10 shrink-0 group-hover:border-white/30 transition-all"
+                              />
+                              <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                <Eye size={12} className="text-white" />
+                              </div>
+                            </div>
+                            <div 
+                              className="min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
+                              onClick={() => setSelectedFriendForModal(u)}
+                            >
                               <h4 className="text-xs font-bold text-white truncate">{u.full_name}</h4>
                               <p className="text-[10px] text-gray-400 truncate">@{u.username}</p>
                             </div>
@@ -1161,16 +1172,27 @@ export default function ProfilePage() {
                         }`}
                       >
                         {/* Sender Header */}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2.5">
-                            <img 
-                              src={senderAvatar} 
-                              alt={senderName} 
-                              className="w-7 h-7 rounded-full object-cover border border-white/20"
-                            />
-                            <span className="text-xs font-bold text-white">
-                              {senderName}
-                            </span>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">
+                              <div 
+                                className="relative cursor-pointer group"
+                                onClick={() => setSelectedFriendForModal(share.sender)}
+                              >
+                                <img 
+                                  src={senderAvatar} 
+                                  alt={senderName} 
+                                  className="w-7 h-7 rounded-full object-cover border border-white/20 group-hover:border-white/40 transition-all"
+                                />
+                                <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                  <Eye size={10} className="text-white" />
+                                </div>
+                              </div>
+                              <span 
+                                className="text-xs font-bold text-white cursor-pointer hover:underline"
+                                onClick={() => setSelectedFriendForModal(share.sender)}
+                              >
+                                {senderName}
+                              </span>
                             <span className="text-[10px] text-gray-500 font-mono">
                               {isSentByMe ? "avez recommandé :" : "a recommandé :"}
                             </span>

@@ -9,6 +9,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useNavigate } from 'react-router-dom';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import AddToPlaylistModal from '../components/common/AddToPlaylistModal';
+import ImportPlaylistModal from '../components/common/ImportPlaylistModal';
 import TrackImage from '../components/common/TrackImage';
 import DownloadBadge from '../components/common/DownloadBadge';
 import { getDownloadedTracks } from '../services/offlineStorageService';
@@ -90,6 +91,7 @@ export default function LibraryPage() {
   // Detailed View State (Default to liked tracks view inline)
   const [selectedPlaylistDetail, setSelectedPlaylistDetail] = useState({ type: 'likes' });
   const [showCreatePlaylistModal, setShowCreatePlaylistModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [downloadedTracksList, setDownloadedTracksList] = useState([]);
 
@@ -280,13 +282,20 @@ export default function LibraryPage() {
             />
           </div>
 
-          <button
-            onClick={() => setShowCreatePlaylistModal(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-all active:scale-95 border border-white/15 shrink-0"
-          >
-            <Plus size={16} style={{ color: primaryColor }} />
-            <span className="hidden sm:inline">Créer une playlist</span>
-          </button>
+            <button
+              onClick={() => setShowCreatePlaylistModal(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-all active:scale-95 border border-white/15 shrink-0"
+            >
+              <Plus size={16} style={{ color: primaryColor }} />
+              <span className="hidden sm:inline">Créer</span>
+            </button>
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-all active:scale-95 border border-white/15 shrink-0"
+            >
+              <Download size={16} style={{ color: primaryColor }} />
+              <span className="hidden sm:inline">Importer</span>
+            </button>
         </div>
 
         {/* Search, Sort and View Switcher Controls */}
@@ -391,6 +400,11 @@ export default function LibraryPage() {
       />
 
       {/* MODAL CRÉER UNE PLAYLIST */}
+      <ImportPlaylistModal 
+        isOpen={showImportModal} 
+        onClose={() => setShowImportModal(false)} 
+        primaryColor={primaryColor} 
+      />
       {showCreatePlaylistModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <form 

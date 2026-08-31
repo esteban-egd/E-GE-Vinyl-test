@@ -575,6 +575,38 @@ async function startServer() {
     }
   });
 
+  // Proxy for Playlist Import (Spotify/Deezer)
+  app.get("/api/playlist-import", async (req, res) => {
+    try {
+      const { url, type } = req.query;
+      if (!url || !type) {
+        return res.status(400).json({ error: "Missing url or type" });
+      }
+
+      const headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7"
+      };
+
+      if (type === "spotify") {
+        const response = await fetch(url as string, { headers });
+        if (!response.ok) throw new Error("Failed to fetch Spotify playlist");
+        const html = await response.text();
+        res.send(html);
+      } else if (type === "deezer") {
+        const response = await fetch(url as string, { headers });
+        if (!response.ok) throw new Error("Failed to fetch Deezer playlist");
+        const data = await response.json();
+        res.json(data);
+      } else {
+        res.status(400).json({ error: "Invalid type" });
+      }
+    } catch (err: any) {
+      console.error("[Server] Playlist import error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Proxy Innertube WEB_REMIX API (E-GE Vinyl extraction)
   // Proxy Innertube WEB_REMIX API (E-GE Vinyl extraction)
   app.post("/api/innertube-player", async (req, res) => {

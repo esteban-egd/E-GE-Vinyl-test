@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, Heart, Disc, Sparkles, Send, MessageSquare, Lock, EyeOff, Play, 
-  Search, Check, Music, Radio, Activity, Globe, Users, LockKeyhole
+  Search, Check, Music, Radio, Activity, Globe, Users, LockKeyhole, UserPlus
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useSocial } from '../../context/SocialContext';
@@ -12,7 +12,7 @@ import { toast } from 'react-hot-toast';
 
 export default function UserProfileModal({ friend, isOpen, onClose }) {
   const { currentTheme } = useTheme();
-  const { friends, shareTrackWithFriend } = useSocial();
+  const { friends, shareTrackWithFriend, sendFriendRequest, pendingRequests } = useSocial();
   const { play } = useAudio();
 
   const [activeTab, setActiveTab] = useState('likes'); // 'likes' | 'playlists' | 'artists'
@@ -33,7 +33,11 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const [sending, setSending] = useState(false);
 
   // Determine friendship status
-  const isFriend = friends.some(f => f.id === friend?.id);
+  const isFriend = friends.some(f => (f.id === friend?.id || f.uid === friend?.id || f.id === friend?.uid || f.uid === friend?.uid));
+  const isRequested = pendingRequests.some(r => (r.user?.id || r.user?.uid) === (friend?.id || friend?.uid));
+
+  // Action Button logic
+  const canShare = isFriend;
 
   // Privacy evaluations
   // Defaults: 'friends' for likes, playlists, and artists
@@ -234,16 +238,38 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                 </div>
               </div>
 
-              {/* Action Button: Envoyer un morceau */}
-              <div className="w-full md:w-auto shrink-0 mt-2 md:mt-0">
-                <button
-                  onClick={() => setShowSharePanel(!showSharePanel)}
-                  className="w-full md:w-auto px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer"
-                  style={{ backgroundColor: currentTheme.primary, color: '#000000' }}
-                >
-                  <Send size={14} />
-                  <span>{showSharePanel ? 'Fermer le partage' : 'Envoyer un morceau'}</span>
-                </button>
+              {/* Action Buttons */}
+              <div className="w-full md:w-auto shrink-0 mt-2 md:mt-0 flex flex-col gap-2">
+                {canShare ? (
+                  <button
+                    onClick={() => setShowSharePanel(!showSharePanel)}
+                    className="w-full md:w-auto px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                    style={{ backgroundColor: currentTheme.primary, color: '#000000' }}
+                  >
+                    <Send size={14} />
+                    <span>{showSharePanel ? 'Fermer le partage' : 'Envoyer un morceau'}</span>
+                  </button>
+                ) : (
+                  <>
+                    {isRequested ? (
+                      <div 
+                        className="w-full md:w-auto px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 bg-white/10 text-gray-400 border border-white/10"
+                      >
+                        <Check size={14} />
+                        <span>Demande envoyée</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => sendFriendRequest(friend)}
+                        className="w-full md:w-auto px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                        style={{ backgroundColor: currentTheme.primary, color: '#000000' }}
+                      >
+                        <UserPlus size={14} />
+                        <span>Ajouter en ami</span>
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 

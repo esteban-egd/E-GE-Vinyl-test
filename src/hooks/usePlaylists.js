@@ -35,9 +35,14 @@ export function usePlaylists() {
     const handleAuth = () => {
       fetchPlaylists();
     };
+    const handleRefresh = () => {
+      fetchPlaylists();
+    };
     window.addEventListener('lyra:auth_changed', handleAuth);
+    window.addEventListener('lyra:playlists_updated', handleRefresh);
     return () => {
       window.removeEventListener('lyra:auth_changed', handleAuth);
+      window.removeEventListener('lyra:playlists_updated', handleRefresh);
     };
   }, [fetchPlaylists]);
 
@@ -55,6 +60,9 @@ export function usePlaylists() {
         .single();
 
       if (error) throw error;
+      
+      // Dispatch global event for other components
+      window.dispatchEvent(new CustomEvent('lyra:playlists_updated'));
       fetchPlaylists();
       return data.id;
     } catch (err) {
@@ -73,6 +81,7 @@ export function usePlaylists() {
         .eq('user_id', user.id);
 
       if (error) throw error;
+      window.dispatchEvent(new CustomEvent('lyra:playlists_updated'));
       fetchPlaylists();
     } catch (err) {
       console.error('Error deleting playlist:', err.message);
@@ -120,6 +129,7 @@ export function usePlaylists() {
           .eq('id', playlistId);
       }
       
+      window.dispatchEvent(new CustomEvent('lyra:playlists_updated'));
       fetchPlaylists();
     } catch (err) {
       console.error('Error adding track to playlist:', err.message);
@@ -136,6 +146,7 @@ export function usePlaylists() {
         .eq('user_id', user.id);
 
       if (error) throw error;
+      window.dispatchEvent(new CustomEvent('lyra:playlists_updated'));
       fetchPlaylists();
     } catch (err) {
       console.error('Error updating playlist cover:', err.message);
@@ -152,6 +163,7 @@ export function usePlaylists() {
         .eq('user_id', user.id);
 
       if (error) throw error;
+      window.dispatchEvent(new CustomEvent('lyra:playlists_updated'));
       fetchPlaylists();
     } catch (err) {
       console.error('Error updating playlist name:', err.message);
@@ -173,6 +185,7 @@ export function usePlaylists() {
          .update({ updated_at: new Date().toISOString() })
          .eq('id', playlistId);
          
+       window.dispatchEvent(new CustomEvent('lyra:playlists_updated'));
        fetchPlaylists();
      } catch (err) {
         console.error('Error removing track from playlist:', err.message);
@@ -187,7 +200,8 @@ export function usePlaylists() {
     addTrackToPlaylist,
     removeTrackFromPlaylist,
     updatePlaylistCover,
-    updatePlaylistName
+    updatePlaylistName,
+    fetchPlaylists
   };
 }
 
