@@ -37,21 +37,36 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const [sending, setSending] = useState(false);
 
   // Robust ID extraction
-  const getUserId = (obj) => obj?.id || obj?.uid || obj?.user_id || obj?.friend_id || obj?.sender_id || obj?.receiver_id || obj?.recipient_id;
+  const getUserId = (obj) => {
+    if (!obj) return null;
+    // Special handling for friend relationship objects (they have a .friend profile)
+    if (obj.friend && (obj.friend.id || obj.friend.uid)) return obj.friend.id || obj.friend.uid;
+    // Otherwise return the direct ID
+    return obj.id || obj.uid || obj.user_id || obj.friend_id || obj.sender_id || obj.receiver_id;
+  };
 
   const targetId = getUserId(friend);
   const currentUserId = user?.id || user?.uid;
-  const isMe = currentUserId === targetId;
+  const isMe = currentUserId && targetId && String(currentUserId) === String(targetId);
 
   // Determine friendship status
   const isFriend = isMe || friends.some(f => {
-    const fId = getUserId(f);
-    return fId && targetId && fId === targetId;
+    // In SocialContext, we fetch friends and store them as relationship rows
+    // The friend's UUID is in f.friend_id (if we are requester) or f.user_id (if we are receiver)
+    // But SocialContext also attaches the profile as .friend
+    const fProfileId = f.friend?.id || f.friend?.uid;
+    const fRelUserId = f.user_id;
+    const fRelFriendId = f.friend_id;
+    
+    const actualFriendId = (String(fRelUserId) === String(currentUserId)) ? fRelFriendId : fRelUserId;
+    
+    return (actualFriendId && String(actualFriendId) === String(targetId)) || 
+           (fProfileId && String(fProfileId) === String(targetId));
   });
 
   const isRequested = !isMe && pendingRequests.some(r => {
     const rUserId = getUserId(r.user);
-    return rUserId && targetId && rUserId === targetId;
+    return rUserId && targetId && String(rUserId) === String(targetId);
   });
 
   // Actual profile to use (prefer freshly fetched)
@@ -68,6 +83,14 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const canSeeLikes = isMe || privacyLikes === 'public' || (privacyLikes === 'friends' && isFriend);
   const canSeePlaylists = isMe || privacyPlaylists === 'public' || (privacyPlaylists === 'friends' && isFriend);
   const canSeeTopArtists = isMe || privacyArtists === 'public' || (privacyArtists === 'friends' && isFriend);
+
+  console.log("[UserProfileModal] Évaluation Droits UI:", {
+    targetId,
+    isMe,
+    isFriend,
+    privacyLikes,
+    canSeeLikes
+  });
 
   useEffect(() => {
     if (!friend || !isOpen) {
