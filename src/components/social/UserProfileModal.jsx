@@ -33,9 +33,21 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
 
+  // Robust ID extraction
+  const getUserId = (obj) => obj?.id || obj?.uid || obj?.user_id || obj?.friend_id || obj?.sender_id || obj?.receiver_id || obj?.recipient_id;
+
+  const targetId = getUserId(friend);
+
   // Determine friendship status
-  const isFriend = friends.some(f => (f.id === friend?.id || f.uid === friend?.id || f.id === friend?.uid || f.uid === friend?.uid));
-  const isRequested = pendingRequests.some(r => (r.user?.id || r.user?.uid) === (friend?.id || friend?.uid));
+  const isFriend = friends.some(f => {
+    const fId = getUserId(f);
+    return fId && targetId && fId === targetId;
+  });
+
+  const isRequested = pendingRequests.some(r => {
+    const rUserId = getUserId(r.user);
+    return rUserId && targetId && rUserId === targetId;
+  });
 
   // Actual profile to use (prefer freshly fetched)
   const activeProfile = profileData || friend;
@@ -43,11 +55,10 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   // Action Button logic
   const canShare = isFriend;
 
-  // Privacy evaluations
-  // Defaults: 'friends' for likes, playlists, and artists
-  const privacyLikes = activeProfile?.privacy_likes || 'friends';
-  const privacyPlaylists = activeProfile?.privacy_playlists || 'friends';
-  const privacyArtists = activeProfile?.privacy_artists || 'friends';
+  // Privacy evaluations - case-insensitive
+  const privacyLikes = (activeProfile?.privacy_likes || 'friends').toLowerCase();
+  const privacyPlaylists = (activeProfile?.privacy_playlists || 'friends').toLowerCase();
+  const privacyArtists = (activeProfile?.privacy_artists || 'friends').toLowerCase();
 
   const canSeeLikes = privacyLikes === 'public' || (privacyLikes === 'friends' && isFriend);
   const canSeePlaylists = privacyPlaylists === 'public' || (privacyPlaylists === 'friends' && isFriend);
@@ -66,65 +77,71 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
       if (!isOpen || !friend) return;
       
       setLoading(true);
-      const targetId = friend.id || friend.uid || friend.user_id;
-      const currentUserId = supabase.auth.getUser()?.id;
+      const currentTargetId = getUserId(friend);
       
-      console.log("[UserProfileModal] Chargement des données pour targetId:", targetId);
-      console.log("[UserProfileModal] Liste de mes amis (IDs):", friends.map(f => f.id || f.uid));
+      console.log("[UserProfileModal] Initialisation chargement :", {
+        friend_object: friend,
+        resolved_targetId: currentTargetId
+      });
       
       try {
-        // 0. Fetch latest profile data to get privacy settings
+        // 0. Fetch latest profile data to get privacy settings and verify ID
         const { data: latestProfile, error: profileError } = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', targetId)
+          .eq('id', currentTargetId)
           .maybeSingle();
         
         if (profileError) {
-          console.warn("[UserProfileModal] Erreur récupération profil:", profileError);
+          console.error("[UserProfileModal] Erreur critique profil:", profileError);
         }
 
         if (latestProfile) {
+          console.log("[UserProfileModal] Profil frais récupéré :", latestProfile);
           setProfileData(latestProfile);
+        } else {
+          console.warn("[UserProfileModal] Aucun profil trouvé en base pour l'ID:", currentTargetId);
         }
 
-        // Determine permissions locally to avoid stale state issues from setProfileData
-        const pLikes = latestProfile?.privacy_likes || friend?.privacy_likes || 'friends';
-        const pPlaylists = latestProfile?.privacy_playlists || friend?.privacy_playlists || 'friends';
-        const pArtists = latestProfile?.privacy_artists || friend?.privacy_artists || 'friends';
+        // Determine permissions with case-insensitivity and defaults
+        const pLikes = (latestProfile?.privacy_likes || friend?.privacy_likes || 'friends').toLowerCase();
+        const pPlaylists = (latestProfile?.privacy_playlists || friend?.privacy_playlists || 'friends').toLowerCase();
+        const pArtists = (latestProfile?.privacy_artists || friend?.privacy_artists || 'friends').toLowerCase();
 
-        // Re-calculate isFriend locally to be extra sure
-        const isCurrentlyFriend = friends.some(f => 
-          (f.id === targetId || f.uid === targetId || f.user_id === targetId)
-        );
+        // Robust friendship check (using current friends state)
+        const isCurrentlyFriend = friends.some(f => {
+          const fId = getUserId(f);
+          return fId === currentTargetId;
+        });
 
         const canSeeL = pLikes === 'public' || (pLikes === 'friends' && isCurrentlyFriend);
         const canSeeP = pPlaylists === 'public' || (pPlaylists === 'friends' && isCurrentlyFriend);
         const canSeeA = pArtists === 'public' || (pArtists === 'friends' && isCurrentlyFriend);
 
-        console.log("[UserProfileModal] Autorisations calculées:", { 
-          targetId, 
+        console.log("[UserProfileModal] Calcul des droits d'accès :", { 
+          currentTargetId, 
           isFriend: isCurrentlyFriend, 
-          canSeeLikes: canSeeL, 
-          privacySetting: pLikes 
+          permissions: { likes: canSeeL, playlists: canSeeP, artists: canSeeA },
+          privacy_settings: { likes: pLikes, playlists: pPlaylists, artists: pArtists }
         });
 
         let finalLikes = [];
 
         // 1. Load Liked Tracks if permitted
         if (canSeeL) {
+          console.log("[UserProfileModal] Requête des likes pour:", currentTargetId);
           const { data: likesData, error: likesError } = await supabase
             .from('likes')
             .select('*')
-            .eq('user_id', targetId)
+            .eq('user_id', currentTargetId)
             .order('created_at', { ascending: false });
 
           if (likesError) {
-            console.error("[UserProfileModal] Erreur chargement likes:", likesError);
+            console.error("[UserProfileModal] Erreur requête likes:", likesError);
           }
 
-          if (!likesError && likesData) {
-            console.log(`[UserProfileModal] ${likesData.length} likes trouvés.`);
+          if (likesData) {
+            console.log(`[UserProfileModal] Résultat requête likes: ${likesData.length} morceaux`, likesData);
             finalLikes = likesData.map(item => ({
               ...item,
               videoId: item.video_id || item.videoId || item.id,
@@ -138,7 +155,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
             setLikedTracks([]);
           }
         } else {
-          console.log("[UserProfileModal] Accès aux likes refusé (Confidentialité)");
+          console.log("[UserProfileModal] Accès REFUSÉ aux likes (Confidentialité ou Amitié manquante)");
           setLikedTracks([]);
         }
 
@@ -147,7 +164,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
           const { data: playlistsData, error: playlistsError } = await supabase
             .from('playlists')
             .select('*')
-            .eq('user_id', targetId)
+            .eq('user_id', currentTargetId)
             .order('updated_at', { ascending: false });
 
           if (!playlistsError && playlistsData) {
@@ -164,7 +181,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
           const { data: historyData } = await supabase
             .from('listening_history')
             .select('*')
-            .eq('user_id', targetId)
+            .eq('user_id', currentTargetId)
             .order('played_at', { ascending: false })
             .limit(40);
 
@@ -173,7 +190,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
             const { data: fallbackLikes } = await supabase
               .from('likes')
               .select('artist')
-              .eq('user_id', targetId);
+              .eq('user_id', currentTargetId);
             likesForArtists = fallbackLikes || [];
           }
 
