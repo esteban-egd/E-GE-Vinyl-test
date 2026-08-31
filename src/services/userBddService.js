@@ -39,8 +39,37 @@ export async function recordListeningHistory(user, track) {
   // 2. Supabase BDD record linked to user_id
   try {
     await supabase.from('listening_history').insert(payload);
+    
+    // 3. Update profile status to 'listening' and set current_track
+    await updateUserStatus(userId, 'listening', track.title);
   } catch (err) {
     console.warn('[userBddService] Supabase listening_history insert error:', err);
+  }
+}
+
+/**
+ * Update user status and current track in profiles table
+ */
+export async function updateUserStatus(userId, status, currentTrack = null) {
+  if (!userId) return;
+  
+  try {
+    const payload = {
+      status: status || 'online',
+      updated_at: new Date().toISOString()
+    };
+    
+    if (currentTrack !== undefined) {
+      payload.current_track = currentTrack;
+    }
+    
+    await supabase
+      .from('profiles')
+      .update(payload)
+      .eq('id', userId);
+  } catch (err) {
+    // Silently fail if column doesn't exist yet
+    console.warn('[userBddService] Failed to update profile status:', err.message);
   }
 }
 

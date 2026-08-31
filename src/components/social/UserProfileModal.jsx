@@ -22,6 +22,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const [playlists, setPlaylists] = useState([]);
   const [topArtists, setTopArtists] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [profileData, setProfileData] = useState(null);
 
   // Send song states
   const [showSharePanel, setShowSharePanel] = useState(false);
@@ -36,75 +37,143 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const isFriend = friends.some(f => (f.id === friend?.id || f.uid === friend?.id || f.id === friend?.uid || f.uid === friend?.uid));
   const isRequested = pendingRequests.some(r => (r.user?.id || r.user?.uid) === (friend?.id || friend?.uid));
 
+  // Actual profile to use (prefer freshly fetched)
+  const activeProfile = profileData || friend;
+
   // Action Button logic
   const canShare = isFriend;
 
   // Privacy evaluations
   // Defaults: 'friends' for likes, playlists, and artists
-  const privacyLikes = friend?.privacy_likes || 'friends';
-  const privacyPlaylists = friend?.privacy_playlists || 'friends';
-  const privacyArtists = friend?.privacy_artists || 'friends';
+  const privacyLikes = activeProfile?.privacy_likes || 'friends';
+  const privacyPlaylists = activeProfile?.privacy_playlists || 'friends';
+  const privacyArtists = activeProfile?.privacy_artists || 'friends';
 
   const canSeeLikes = privacyLikes === 'public' || (privacyLikes === 'friends' && isFriend);
   const canSeePlaylists = privacyPlaylists === 'public' || (privacyPlaylists === 'friends' && isFriend);
   const canSeeTopArtists = privacyArtists === 'public' || (privacyArtists === 'friends' && isFriend);
 
   useEffect(() => {
-    if (!friend || !isOpen) return;
+    if (!friend || !isOpen) {
+      setProfileData(null);
+      setLikedTracks([]);
+      setPlaylists([]);
+      setTopArtists([]);
+      return;
+    }
 
     const loadFriendProfileData = async () => {
+      if (!isOpen || !friend) return;
+      
       setLoading(true);
+      const targetId = friend.id || friend.uid || friend.user_id;
+      const currentUserId = supabase.auth.getUser()?.id;
+      
+      console.log("[UserProfileModal] Chargement des données pour targetId:", targetId);
+      console.log("[UserProfileModal] Liste de mes amis (IDs):", friends.map(f => f.id || f.uid));
+      
       try {
+        // 0. Fetch latest profile data to get privacy settings
+        const { data: latestProfile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', targetId)
+          .maybeSingle();
+        
+        if (profileError) {
+          console.warn("[UserProfileModal] Erreur récupération profil:", profileError);
+        }
+
+        if (latestProfile) {
+          setProfileData(latestProfile);
+        }
+
+        // Determine permissions locally to avoid stale state issues from setProfileData
+        const pLikes = latestProfile?.privacy_likes || friend?.privacy_likes || 'friends';
+        const pPlaylists = latestProfile?.privacy_playlists || friend?.privacy_playlists || 'friends';
+        const pArtists = latestProfile?.privacy_artists || friend?.privacy_artists || 'friends';
+
+        // Re-calculate isFriend locally to be extra sure
+        const isCurrentlyFriend = friends.some(f => 
+          (f.id === targetId || f.uid === targetId || f.user_id === targetId)
+        );
+
+        const canSeeL = pLikes === 'public' || (pLikes === 'friends' && isCurrentlyFriend);
+        const canSeeP = pPlaylists === 'public' || (pPlaylists === 'friends' && isCurrentlyFriend);
+        const canSeeA = pArtists === 'public' || (pArtists === 'friends' && isCurrentlyFriend);
+
+        console.log("[UserProfileModal] Autorisations calculées:", { 
+          targetId, 
+          isFriend: isCurrentlyFriend, 
+          canSeeLikes: canSeeL, 
+          privacySetting: pLikes 
+        });
+
+        let finalLikes = [];
+
         // 1. Load Liked Tracks if permitted
-        if (canSeeLikes) {
+        if (canSeeL) {
           const { data: likesData, error: likesError } = await supabase
             .from('likes')
             .select('*')
-            .eq('user_id', friend.id)
+            .eq('user_id', targetId)
             .order('created_at', { ascending: false });
 
+          if (likesError) {
+            console.error("[UserProfileModal] Erreur chargement likes:", likesError);
+          }
+
           if (!likesError && likesData) {
-            setLikedTracks(likesData.map(item => ({
+            console.log(`[UserProfileModal] ${likesData.length} likes trouvés.`);
+            finalLikes = likesData.map(item => ({
               ...item,
               videoId: item.video_id || item.videoId || item.id,
               id: item.video_id || item.videoId || item.id,
               title: item.title || 'Titre inconnu',
               artist: item.artist || 'Artiste inconnu',
               thumbnail: item.thumbnail || ''
-            })));
+            }));
+            setLikedTracks(finalLikes);
+          } else {
+            setLikedTracks([]);
           }
+        } else {
+          console.log("[UserProfileModal] Accès aux likes refusé (Confidentialité)");
+          setLikedTracks([]);
         }
 
         // 2. Load Playlists if permitted
-        if (canSeePlaylists) {
+        if (canSeeP) {
           const { data: playlistsData, error: playlistsError } = await supabase
             .from('playlists')
             .select('*')
-            .eq('user_id', friend.id)
+            .eq('user_id', targetId)
             .order('updated_at', { ascending: false });
 
           if (!playlistsError && playlistsData) {
             setPlaylists(playlistsData || []);
+          } else {
+            setPlaylists([]);
           }
+        } else {
+          setPlaylists([]);
         }
 
         // 3. Load Listening History & Calculate Top Artists
-        if (canSeeTopArtists) {
-          const { data: historyData, error: historyError } = await supabase
+        if (canSeeA) {
+          const { data: historyData } = await supabase
             .from('listening_history')
             .select('*')
-            .eq('user_id', friend.id)
+            .eq('user_id', targetId)
             .order('played_at', { ascending: false })
             .limit(40);
 
-          let likesForArtists = [];
-          if (canSeeLikes) {
-            likesForArtists = likedTracks;
-          } else {
+          let likesForArtists = finalLikes;
+          if (!canSeeL) {
             const { data: fallbackLikes } = await supabase
               .from('likes')
               .select('artist')
-              .eq('user_id', friend.id);
+              .eq('user_id', targetId);
             likesForArtists = fallbackLikes || [];
           }
 
@@ -127,16 +196,18 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
             .slice(0, 5);
 
           setTopArtists(sortedArtists);
+        } else {
+          setTopArtists([]);
         }
       } catch (err) {
-        console.warn("[UserProfileModal] Erreur chargement des données:", err);
+        console.warn("[UserProfileModal] Erreur globale chargement:", err);
       } finally {
         setLoading(false);
       }
     };
 
     loadFriendProfileData();
-  }, [friend, isOpen, canSeeLikes, canSeePlaylists, canSeeTopArtists]);
+  }, [friend, isOpen, isFriend]);
 
   // Search tracks to share
   const handleTrackSearch = async (e) => {
@@ -161,7 +232,8 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
     if (!selectedTrack) return;
     setSending(true);
     try {
-      await shareTrackWithFriend(friend.id, selectedTrack, message);
+      const targetId = friend.id || friend.uid;
+      await shareTrackWithFriend(targetId, selectedTrack, message);
       toast.success(`"${selectedTrack.title}" partagé avec succès !`);
       setSelectedTrack(null);
       setMessage('');
@@ -173,7 +245,21 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
     }
   };
 
+  const getPrivacyIcon = (setting) => {
+    if (setting === 'public') return <Globe size={10} className="text-emerald-400" />;
+    if (setting === 'friends') return <Users size={10} className="text-blue-400" />;
+    return <Lock size={10} className="text-amber-400" />;
+  };
+
+  const getPrivacyLabel = (setting) => {
+    if (setting === 'public') return 'Public';
+    if (setting === 'friends') return 'Amis';
+    return 'Privé';
+  };
+
   if (!isOpen || !friend) return null;
+
+  const displayUser = activeProfile || friend;
 
   return (
     <AnimatePresence>
@@ -185,33 +271,36 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
           className="w-full max-w-2xl rounded-3xl border border-white/10 shadow-2xl overflow-hidden relative flex flex-col max-h-[90vh]"
           style={{ backgroundColor: currentTheme.cardBg }}
         >
-          {/* Close button */}
-          <button
-            onClick={onClose}
-            className="absolute top-5 right-5 z-10 p-2.5 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
-          >
-            <X size={18} />
-          </button>
+          {/* Top Bar for Close Button */}
+          <div className="flex justify-end p-2 border-b border-white/5 bg-white/5 shrink-0">
+            <button
+              onClick={onClose}
+              className="p-2 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+          </div>
 
-          {/* Header section */}
-          <div className="p-6 md:p-8 border-b border-white/10 bg-gradient-to-b from-white/5 to-transparent relative">
+          <div className="flex-1 overflow-y-auto no-scrollbar">
+            {/* Header section */}
+            <div className="p-6 md:p-8 border-b border-white/10 bg-gradient-to-b from-white/5 to-transparent relative">
             <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
               <div className="relative">
                 <img 
-                  src={friend.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'} 
-                  alt={friend.full_name} 
+                  src={displayUser.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'} 
+                  alt={displayUser.full_name} 
                   className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover border-4 border-white/10 shadow-xl"
                 />
                 <span 
                   className={`absolute bottom-1 right-1 w-4.5 h-4.5 rounded-full border-4 border-black ${
-                    friend.status === 'online' || friend.status === 'listening' ? 'bg-emerald-500 animate-pulse' : 'bg-gray-500'
+                    displayUser.status === 'online' || displayUser.status === 'listening' ? 'bg-emerald-500 animate-pulse' : 'bg-gray-500'
                   }`}
                 />
               </div>
 
               <div className="text-center md:text-left space-y-2 flex-1 min-w-0">
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
-                  <h2 className="text-xl md:text-2xl font-black text-white truncate">{friend.full_name || friend.username}</h2>
+                  <h2 className="text-xl md:text-2xl font-black text-white truncate">{displayUser.full_name || displayUser.username}</h2>
                   {isFriend && (
                     <span 
                       className="text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider text-black self-center shadow-sm shrink-0"
@@ -221,18 +310,18 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-gray-400 font-mono">@{friend.username}</p>
+                <p className="text-xs text-gray-400 font-mono">@{displayUser.username}</p>
                 
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-xs mt-1">
                   <span className="flex items-center gap-1.5 text-gray-400">
                     <Activity size={13} style={{ color: currentTheme.primary }} />
-                    <span className="capitalize">{friend.status === 'listening' ? 'En écoute' : friend.status === 'online' ? 'En ligne' : 'Hors-ligne'}</span>
+                    <span className="capitalize">{displayUser.status === 'listening' ? 'En écoute' : displayUser.status === 'online' ? 'En ligne' : 'Hors-ligne'}</span>
                   </span>
                   
-                  {friend.current_track && (
+                  {displayUser.current_track && (
                     <span className="text-emerald-400 font-medium flex items-center gap-1.5 animate-pulse truncate max-w-[250px]">
                       <Radio size={13} />
-                      <span className="truncate">Écoute : <strong>{friend.current_track}</strong></span>
+                      <span className="truncate">Écoute : <strong>{displayUser.current_track}</strong></span>
                     </span>
                   )}
                 </div>
@@ -260,7 +349,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                       </div>
                     ) : (
                       <button
-                        onClick={() => sendFriendRequest(friend)}
+                        onClick={() => sendFriendRequest(displayUser)}
                         className="w-full md:w-auto px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                         style={{ backgroundColor: currentTheme.primary, color: '#000000' }}
                       >
@@ -285,7 +374,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                   <div className="flex items-center justify-between border-b border-white/5 pb-2">
                     <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
                       <Music size={13} style={{ color: currentTheme.primary }} />
-                      <span>Recommander un morceau à {friend.full_name || friend.username}</span>
+                      <span>Recommander un morceau à {displayUser.full_name || displayUser.username}</span>
                     </h3>
                   </div>
 
@@ -394,10 +483,10 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
           {/* Navigation Tabs */}
           <div className="flex border-b border-white/10 px-6 py-2 bg-black/20 overflow-x-auto no-scrollbar gap-1">
             {[
-              { id: 'likes', label: `Titres Likés (${likedTracks.length})`, icon: Heart },
-              { id: 'playlists', label: `Playlists (${playlists.length})`, icon: Disc },
-              { id: 'artists', label: 'Top Artistes', icon: Sparkles }
-            ].map(({ id, label, icon: Icon }) => (
+              { id: 'likes', label: `Titres Likés (${likedTracks.length})`, icon: Heart, privacy: privacyLikes },
+              { id: 'playlists', label: `Playlists (${playlists.length})`, icon: Disc, privacy: privacyPlaylists },
+              { id: 'artists', label: 'Top Artistes', icon: Sparkles, privacy: privacyArtists }
+            ].map(({ id, label, icon: Icon, privacy }) => (
               <button
                 key={id}
                 onClick={() => setActiveTab(id)}
@@ -408,8 +497,16 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                 }`}
                 style={activeTab === id ? { color: currentTheme.primary, borderColor: currentTheme.primary } : {}}
               >
-                <Icon size={14} />
-                <span>{label}</span>
+                <div className="flex flex-col items-center gap-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <Icon size={14} />
+                    <span>{label}</span>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-60">
+                    {getPrivacyIcon(privacy)}
+                    <span className="text-[8px] font-mono lowercase tracking-normal">{getPrivacyLabel(privacy)}</span>
+                  </div>
+                </div>
               </button>
             ))}
           </div>
@@ -540,8 +637,9 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
               </>
             )}
           </div>
-        </motion.div>
-      </div>
-    </AnimatePresence>
-  );
+        </div>
+      </motion.div>
+    </div>
+  </AnimatePresence>
+);
 }

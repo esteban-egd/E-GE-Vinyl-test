@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast';
 import { useAuth } from './AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import db from '../lib/db';
+import { updateUserStatus } from '../services/userBddService';
 
 const SocialContext = createContext({});
 
@@ -237,6 +238,12 @@ export const SocialProvider = ({ children }) => {
     const currentUserId = user?.id || user?.uid;
     if (!currentUserId) return;
 
+    // Periodic "Ping" to keep status as 'online'
+    updateUserStatus(currentUserId, 'online');
+    const pingInterval = setInterval(() => {
+      updateUserStatus(currentUserId, 'online');
+    }, 60000); // Every minute
+
     // Supabase Realtime listener for live friend requests and shared tracks
     const channelName = `social-realtime-${currentUserId}-${Date.now()}`;
     const channel = supabase.channel(channelName)
@@ -387,6 +394,7 @@ export const SocialProvider = ({ children }) => {
       .subscribe();
 
     return () => {
+      clearInterval(pingInterval);
       supabase.removeChannel(channel);
     };
   }, [user, loadSocialData]);
