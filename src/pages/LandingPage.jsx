@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-hot-toast';
 import { Mail, Lock, User, LogIn, Check, Sparkles, ShieldCheck, ArrowRight, ArrowLeft } from 'lucide-react';
@@ -37,7 +36,7 @@ const ClassyPlatter = () => (
 );
 
 const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
-  const { signIn, signUp, signInAsGuest, updateProfile } = useAuth();
+  const { signIn, quickSignIn, signUp, signInAsGuest, updateProfile, savedAccounts, removeSavedAccount } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   
   // Registration Form Steps: 1 = Credentials, 2 = Profile details
@@ -54,6 +53,14 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
   useEffect(() => {
     setRegisterStep(1);
   }, [isLogin]);
+
+  const handleQuickLogin = (acc) => {
+    if (acc?.email) {
+      setEmail(acc.email);
+      setIsLogin(true);
+      toast.success(`Compte sélectionné : ${acc.email}. Veuillez entrer votre mot de passe.`);
+    }
+  };
 
   const handleNextStep = (e) => {
     e.preventDefault();
@@ -77,32 +84,11 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
     setLoading(true);
     try {
       if (isLogin) {
-        const { error } = await signIn(email, password);
+        const { data, error } = await signIn(email, password);
         if (error) {
-          // If Supabase has an error or unconfirmed email or invalid credentials on Vercel deployment,
-          // ensure the user is seamlessly logged in locally and never blocked on login page!
-          if (
-            !import.meta.env.VITE_SUPABASE_URL ||
-            error.message?.includes('Invalid login credentials') ||
-            error.message?.includes('Email not confirmed') ||
-            error.message?.includes('Failed to fetch')
-          ) {
-            console.warn('[Auth] Accès direct au profil local:', error.message);
-            signInAsGuest(
-              email,
-              email.split('@')[0],
-              email.split('@')[0],
-              PRESET_AVATARS[0].url
-            );
-            toast.success("Bienvenue sur E-GE Vinyl !", { duration: 3000 });
-            if (onLoginSuccess) onLoginSuccess();
-            return;
-          }
           throw error;
         }
-        setTimeout(() => {
-          toast.success("Heureux de vous revoir sur E-GE Vinyl !");
-        }, 2000);
+        toast.success("Heureux de vous revoir sur E-GE Vinyl !");
         if (onLoginSuccess) onLoginSuccess();
       } else {
         const finalFullName = (fullName && fullName.trim()) ? fullName.trim() : ((username && username.trim()) ? username.trim() : email.split('@')[0]);
@@ -117,20 +103,9 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
         });
 
         if (error) {
-          // In case of Supabase signup error, activate local session with user's inputted details
-          signInAsGuest(
-            email,
-            finalUsername,
-            finalFullName,
-            finalAvatar
-          );
-          setTimeout(() => {
-            toast.success("Votre compte a été configuré avec succès ! Bienvenue.");
-          }, 2000);
-          if (onLoginSuccess) onLoginSuccess();
-          return;
+          throw error;
         }
-        
+
         if (data?.user) {
           try {
             await updateProfile({
@@ -141,20 +116,7 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
           } catch (_) {}
         }
 
-        // If Supabase didn't log them in automatically (i.e. email confirmation required)
-        // we sign them in locally as a personalized user so they are NOT blocked!
-        if (data?.user && !data?.session) {
-          signInAsGuest(
-            email,
-            finalUsername,
-            finalFullName,
-            finalAvatar
-          );
-        }
-
-        setTimeout(() => {
-          toast.success("Votre compte a été configuré avec succès ! Bienvenue.");
-        }, 2000);
+        toast.success("Votre compte a été configuré avec succès ! Bienvenue.");
         if (onLoginSuccess) onLoginSuccess();
       }
     } catch (error) {
@@ -166,9 +128,7 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
 
   const handleGuestLogin = () => {
     signInAsGuest();
-    setTimeout(() => {
-      toast.success("Bienvenue ! Entrée en mode Invité.");
-    }, 2000);
+    toast.success("Bienvenue ! Entrée en mode Invité.");
     if (onLoginSuccess) onLoginSuccess();
   };
 
@@ -178,7 +138,7 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
       <ConstellationBackground />
 
       {/* Classy & Ultra-Clean Glassmorphic Card (Zero Scrollable Guarantee) */}
-      <div className="relative w-full max-w-[370px] p-5 sm:p-7 rounded-[26px] bg-[#0c0a09]/80 border border-white/[0.04] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.85)] backdrop-blur-2xl z-10 flex flex-col my-auto overflow-hidden">
+      <div className="relative w-full max-w-[390px] p-5 sm:p-6 rounded-[26px] bg-[#0c0a09]/85 border border-white/[0.06] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.85)] backdrop-blur-2xl z-10 flex flex-col my-auto overflow-hidden">
         
         {onBackToPresentation && (
           <button
@@ -197,31 +157,83 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
         <ClassyPlatter />
 
         {/* Brand Title */}
-        <div className="text-center mb-4 shrink-0">
+        <div className="text-center mb-3 shrink-0">
           <h2 className="text-xl font-black tracking-tight text-white uppercase bg-gradient-to-r from-white via-[#fcfbf9] to-[#c29e5a] bg-clip-text text-transparent">
             E-GE VINYL
           </h2>
-          <p className="text-[#f4efe6]/50 text-[10px] mt-1 font-medium leading-relaxed max-w-[280px] mx-auto">
+          <p className="text-[#f4efe6]/50 text-[10px] mt-0.5 font-medium leading-relaxed max-w-[280px] mx-auto">
             {isLogin 
-              ? "Platine audiophile numérique haut de gamme." 
+              ? "Accédez à votre bibliothèque et vos playlists." 
               : registerStep === 1 
                 ? "Étape 1 : Créez vos identifiants sécurisés."
                 : "Étape 2 : Personnalisez votre profil d'écoute."}
           </p>
         </div>
 
+        {/* Saved Accounts Quick Switcher (If available and on Login Tab) */}
+        {isLogin && savedAccounts && savedAccounts.length > 0 && (
+          <div className="mb-3.5 p-2 rounded-xl bg-white/[0.03] border border-white/[0.05] shrink-0">
+            <div className="flex items-center justify-between mb-1.5 px-1">
+              <span className="text-[9px] font-bold text-[#c29e5a] uppercase tracking-wider flex items-center gap-1">
+                <Sparkles size={10} />
+                <span>Comptes récents</span>
+              </span>
+              <span className="text-[8px] text-gray-500 font-mono">1-clic pour entrer</span>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
+              {savedAccounts.slice(0, 3).map((acc) => (
+                <div
+                  key={acc.id}
+                  className="flex items-center gap-2 p-1.5 rounded-lg bg-black/40 hover:bg-[#c29e5a]/10 border border-white/5 hover:border-[#c29e5a]/30 transition-all cursor-pointer group flex-1 min-w-[100px] max-w-[160px]"
+                  onClick={() => handleQuickLogin(acc)}
+                  title={`Se connecter en tant que ${acc.full_name || acc.username}`}
+                >
+                  <img
+                    src={acc.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80'}
+                    alt={acc.username}
+                    className="w-6 h-6 rounded-full object-cover border border-white/10 shrink-0 group-hover:scale-105 transition-transform"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80';
+                    }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold text-white truncate leading-tight group-hover:text-[#c29e5a]">
+                      {acc.full_name || acc.username}
+                    </p>
+                    <p className="text-[8px] text-gray-400 font-mono truncate">
+                      @{acc.username || acc.email?.split('@')[0]}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeSavedAccount(acc.id);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 text-gray-500 transition-opacity"
+                    title="Supprimer de la liste"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Minimal Tab Switcher (Visible only if not in step 2 of registration) */}
         {(!isLogin && registerStep === 2) ? (
           <button
             type="button"
             onClick={handlePrevStep}
-            className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-[#c29e5a] font-bold uppercase tracking-wider mb-4 shrink-0 transition-colors cursor-pointer mr-auto"
+            className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-[#c29e5a] font-bold uppercase tracking-wider mb-3 shrink-0 transition-colors cursor-pointer mr-auto"
           >
             <ArrowLeft size={12} />
             <span>Retour à l'étape 1</span>
           </button>
         ) : (
-          <div className="grid grid-cols-2 p-1 bg-black/40 border border-white/[0.03] rounded-xl mb-4 shrink-0">
+          <div className="grid grid-cols-2 p-1 bg-black/40 border border-white/[0.03] rounded-xl mb-3.5 shrink-0">
             <button
               type="button"
               onClick={() => setIsLogin(true)}
@@ -251,7 +263,7 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
         <div className="w-full">
           {isLogin ? (
             /* --- LOGIN FORM (2 fields, zero-scroll) --- */
-            <form onSubmit={handleSubmit} className="space-y-3.5">
+            <form onSubmit={handleSubmit} className="space-y-3">
               <div className="space-y-1">
                 <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Adresse Email</span>
                 <div className="relative group">
@@ -285,7 +297,7 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 bg-gradient-to-r from-[#e1bb72] to-[#c29e5a] text-[#0d0c0b] font-black uppercase tracking-wider text-xs rounded-xl hover:opacity-95 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-[#c29e5a]/10 cursor-pointer mt-3"
+                className="w-full py-2.5 bg-gradient-to-r from-[#e1bb72] to-[#c29e5a] text-[#0d0c0b] font-black uppercase tracking-wider text-xs rounded-xl hover:opacity-95 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-[#c29e5a]/10 cursor-pointer mt-2"
               >
                 {loading ? (
                   <div className="w-4 h-4 border-2 border-[#0d0c0b]/35 border-t-[#0d0c0b] rounded-full animate-spin" />
@@ -296,27 +308,13 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
                   </div>
                 )}
               </button>
-
-              <div className="relative flex items-center justify-center my-1">
-                <span className="absolute inset-x-0 h-[1px] bg-white/[0.03]" />
-                <span className="relative px-2.5 text-[8.5px] font-black text-gray-600 uppercase bg-[#0c0a09]/10 tracking-widest">OU</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleGuestLogin}
-                className="w-full py-2 px-4 bg-[#c29e5a]/10 hover:bg-[#c29e5a]/20 border border-[#c29e5a]/20 text-[#c29e5a] text-[10px] font-black uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-[#c29e5a]" />
-                <span>Lancer le Lecteur (Mode Démo)</span>
-              </button>
             </form>
           ) : (
             /* --- SIGN UP MULTI-STEP WIZARD (No Scroll) --- */
             <div className="w-full">
               {registerStep === 1 ? (
                 /* --- SIGN UP STEP 1: Email & Password (2 fields) --- */
-                <form onSubmit={handleNextStep} className="space-y-3.5">
+                <form onSubmit={handleNextStep} className="space-y-3">
                   <div className="space-y-1">
                     <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Adresse Email</span>
                     <div className="relative group">
@@ -360,7 +358,7 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
                 </form>
               ) : (
                 /* --- SIGN UP STEP 2: Profile Selection & Identity --- */
-                <form onSubmit={handleSubmit} className="space-y-3.5">
+                <form onSubmit={handleSubmit} className="space-y-3">
                   {/* Avatar Picker (compact layout) */}
                   <div className="bg-black/30 p-2 rounded-xl border border-white/[0.02]">
                     <div className="flex items-center justify-between mb-1.5 px-1">
@@ -409,7 +407,7 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
 
                   {/* Nom complet / Affichage */}
                   <div className="space-y-1">
-                    <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Nom d'affichage (Nom complet)</span>
+                    <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Nom d'affichage</span>
                     <div className="relative group">
                       <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-[#c29e5a] transition-colors" />
                       <input
@@ -424,7 +422,7 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
 
                   {/* Username Field */}
                   <div className="space-y-1">
-                    <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Votre nom d'utilisateur (@handle)</span>
+                    <span className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider px-1">Nom d'utilisateur (@handle)</span>
                     <div className="relative group">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-500 group-focus-within:text-[#c29e5a] transition-colors">@</span>
                       <input
@@ -453,7 +451,7 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
                         <div className="w-3.5 h-3.5 border-2 border-[#0d0c0b]/35 border-t-[#0d0c0b] rounded-full animate-spin" />
                       ) : (
                         <>
-                          <span>S'inscrire</span>
+                          <span>Créer mon compte</span>
                           <Check size={12} className="stroke-[3]" />
                         </>
                       )}
@@ -466,14 +464,14 @@ const LandingPage = ({ onBackToPresentation, onLoginSuccess }) => {
         </div>
 
         {/* Clean Guest Option */}
-        <div className="mt-5 pt-3.5 border-t border-white/[0.03] flex flex-col items-center gap-2 shrink-0">
+        <div className="mt-3.5 pt-2.5 border-t border-white/[0.04] flex flex-col items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={handleGuestLogin}
-            className="w-full py-1.5 px-4 bg-white/5 hover:bg-white/10 border border-white/5 text-gray-300 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full py-1.5 px-4 bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 text-gray-300 hover:text-white text-[9.5px] font-bold uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
             <ShieldCheck className="w-3.5 h-3.5 text-[#c29e5a]" />
-            <span>Accéder en mode Invité</span>
+            <span>Tester en Mode Invité / Démo</span>
           </button>
         </div>
       </div>

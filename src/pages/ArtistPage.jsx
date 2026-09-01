@@ -110,7 +110,11 @@ export default function ArtistPage() {
       setIsBioExpanded(false);
       setScrollY(0);
       try {
-        const data = await getArtistFullData(decodedArtistName);
+        const searchParams = new URLSearchParams(search);
+        const artistIdParam = searchParams.get('id');
+        const queryTarget = artistIdParam || decodedArtistName;
+
+        const data = await getArtistFullData(queryTarget);
         if (isMounted) {
           if (data) {
             setArtist(data);
@@ -149,9 +153,10 @@ export default function ArtistPage() {
         if (isMounted) setIsLoading(false);
       }
     }
+
     loadArtist();
     return () => { isMounted = false; };
-  }, [decodedArtistName]);
+  }, [decodedArtistName, search]);
 
   useEffect(() => {
     const handleScroll = () => {

@@ -19,7 +19,7 @@ import UserProfileModal from '../components/social/UserProfileModal';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import db from '../lib/db';
-import { fetchListeningHistory } from '../services/userBddService';
+import { fetchListeningHistory, getEffectiveStatus, formatListeningTime } from '../services/userBddService';
 import { searchOfficialDeezerArtist } from '../services/artistService';
 
 export default function ProfilePage() {
@@ -34,9 +34,17 @@ export default function ProfilePage() {
     sendFriendRequest, 
     acceptFriendRequest, 
     declineFriendRequest, 
+    cancelFriendRequest,
     removeFriend, 
     updatePrivacySettings,
-    openShareModal
+    openShareModal,
+    unreadReceivedTracksCount,
+    isShareRead,
+    markShareAsRead,
+    markConversationAsRead,
+    markAllReceivedAsRead,
+    getUnreadCountForFriend,
+    sendMessageToFriend
   } = useSocial();
 
   const { likedTracks, toggleLike } = useLikes();
@@ -49,10 +57,42 @@ export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'friends' | 'feed' | 'privacy'
   const [selectedFriendForModal, setSelectedFriendForModal] = useState(null);
   const [selectedFriendFilter, setSelectedFriendFilter] = useState(null);
+  const [chatInput, setChatInput] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
   const [recentTracks, setRecentTracks] = useState([]);
   const [topArtists, setTopArtists] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+
+  const currentUserId = user?.id || user?.uid;
+
+  // Compute unique senders / friends for conversations
+  const uniqueSenders = [];
+  (sharedTracks || []).forEach(share => {
+    const otherUser = share.senderId === currentUserId ? share.receiver : share.sender;
+    if (otherUser && otherUser.id !== currentUserId && !uniqueSenders.some(s => s.id === otherUser.id)) {
+      uniqueSenders.push(otherUser);
+    }
+  });
+  (friends || []).forEach(friend => {
+    if (friend.id !== currentUserId && !uniqueSenders.some(s => s.id === friend.id)) {
+      uniqueSenders.push(friend);
+    }
+  });
+
+  // Automatically select first friend when opening messages tab if none selected
+  useEffect(() => {
+    if (activeTab === 'feed' && !selectedFriendFilter && uniqueSenders.length > 0) {
+      setSelectedFriendFilter(uniqueSenders[0].id);
+    }
+  }, [activeTab, selectedFriendFilter, uniqueSenders]);
+
+  // Automatically mark conversation as read when viewing a specific friend's conversation
+  useEffect(() => {
+    if (activeTab === 'feed' && selectedFriendFilter) {
+      markConversationAsRead(selectedFriendFilter);
+    }
+  }, [activeTab, selectedFriendFilter, markConversationAsRead]);
 
   // Search friends state
   const [searchQuery, setSearchQuery] = useState('');
@@ -159,12 +199,34 @@ export default function ProfilePage() {
   }, [user?.id, user?.uid, likedTracks]);
 
   const avatarUrl = profile?.avatar_url || PRESET_AVATARS[0].url;
-  const displayName = profile?.full_name || profile?.username || (profile ? 'Membre Audiophile' : (user?.email ? user.email.split('@')[0] : 'Membre Audiophile'));
-  const displayUsername = profile?.username ? `@${profile.username.replace('@', '')}` : '@audiophile';
+  const displayName = profile?.full_name?.trim() || user?.user_metadata?.full_name?.trim() || profile?.username?.trim() || (user?.email ? user.email.split('@')[0] : 'Membre Audiophile');
+  const displayUsername = profile?.username ? `@${profile.username.replace('@', '')}` : (user?.user_metadata?.username ? `@${user.user_metadata.username.replace('@', '')}` : (user?.email ? `@${user.email.split('@')[0]}` : '@audiophile'));
 
-  // Calculate approximate listening hours (each played track ~3.5 minutes)
-  const totalPlays = recentTracks.length + likedTracks.length;
-  const estimatedHours = Math.max(1.5, (totalPlays * 3.5 / 60)).toFixed(1);
+  // Real cumulative listening time calculation (Actual audio playback time accumulated in seconds)
+  const totalPlays = (recentTracks.length || 0) + (likedTracks.length || 0);
+  const [liveListeningSeconds, setLiveListeningSeconds] = useState(0);
+
+  useEffect(() => {
+    setLiveListeningSeconds(Number(profile?.total_listening_seconds || 0));
+  }, [profile?.total_listening_seconds]);
+
+  useEffect(() => {
+    const handleListeningTimeUpdated = (e) => {
+      const { userId, totalSeconds } = e.detail;
+      const currentUserId = user?.id || user?.uid;
+      if (userId === currentUserId) {
+        setLiveListeningSeconds(totalSeconds);
+      }
+    };
+    window.addEventListener('lyra:listening_time_updated', handleListeningTimeUpdated);
+    return () => {
+      window.removeEventListener('lyra:listening_time_updated', handleListeningTimeUpdated);
+    };
+  }, [user?.id, user?.uid]);
+
+  const totalListeningSeconds = liveListeningSeconds;
+  const formattedListeningTime = formatListeningTime(totalListeningSeconds);
+  const listeningHoursExact = (totalListeningSeconds / 3600).toFixed(1);
 
   const handleSaveInfo = async (e) => {
     e.preventDefault();
@@ -309,6 +371,14 @@ export default function ProfilePage() {
 
             {/* Dynamic Key Stats Pills */}
             <div className="flex flex-wrap justify-center sm:justify-start items-center gap-3 pt-2">
+              <div 
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-black/50 border border-white/10 text-xs font-bold text-white shadow-sm"
+                title={`Temps d'écoute réel cumulé : ${totalListeningSeconds.toLocaleString('fr-FR')} secondes effectives de lecture musicale`}
+              >
+                <Clock size={14} style={{ color: currentTheme.primary }} />
+                <span><strong style={{ color: currentTheme.primary }}>{formattedListeningTime}</strong> d'écoute réelle</span>
+              </div>
+
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-black/50 border border-white/10 text-xs font-bold text-white shadow-sm">
                 <Users size={14} style={{ color: currentTheme.primary }} />
                 <span><strong style={{ color: currentTheme.primary }}>{friends.length}</strong> Amis</span>
@@ -388,15 +458,11 @@ export default function ProfilePage() {
         >
           <Send size={15} />
           <span>MESSAGES</span>
-          {(() => {
-            const currentUserId = user?.id || user?.uid;
-            const receivedCount = sharedTracks.filter(s => s.receiverId === currentUserId).length;
-            return receivedCount > 0 ? (
-              <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-extrabold shadow-sm animate-pulse border border-red-400/40">
-                {receivedCount}
-              </span>
-            ) : null;
-          })()}
+          {unreadReceivedTracksCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-extrabold shadow-sm animate-pulse border border-red-400/40">
+              {unreadReceivedTracksCount}
+            </span>
+          )}
         </button>
 
         <button
@@ -418,6 +484,83 @@ export default function ProfilePage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
           <div className="lg:col-span-2 space-y-8">
+            {/* Real Cumulative Listening Time Breakdown Card */}
+            <div 
+              className="p-6 rounded-3xl border border-white/10 shadow-xl space-y-4 relative overflow-hidden"
+              style={{ backgroundColor: currentTheme.cardBg }}
+            >
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div 
+                    className="w-8 h-8 rounded-xl flex items-center justify-center border border-white/10 shadow-inner"
+                    style={{ backgroundColor: `${currentTheme.primary}20`, color: currentTheme.primary }}
+                  >
+                    <Clock size={16} />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-black text-white uppercase tracking-tight">
+                      Temps d'écoute réel cumulé
+                    </h2>
+                    <p className="text-[10px] text-gray-400 font-mono">
+                      Calculé uniquement sur la lecture audio active des morceaux
+                    </p>
+                  </div>
+                </div>
+                <span 
+                  className="text-[9px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider border font-mono shrink-0 flex items-center gap-1"
+                  style={{ backgroundColor: `${currentTheme.primary}15`, color: currentTheme.primary, borderColor: `${currentTheme.primary}35` }}
+                >
+                  <Activity size={11} className="animate-pulse" />
+                  <span>Sync BDD Profil</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                <div className="p-4 rounded-2xl bg-black/40 border border-white/5 flex flex-col justify-between">
+                  <span className="text-[10px] font-mono text-gray-400 uppercase tracking-widest">Durée cumulée</span>
+                  <div className="mt-2">
+                    <div className="text-2xl font-black text-white tracking-tight" style={{ color: currentTheme.primary }}>
+                      {formattedListeningTime}
+                    </div>
+                    <p className="text-[10px] text-gray-400 font-mono mt-0.5">
+                      ~{listeningHoursExact} heures totales
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-black/40 border border-white/5 flex flex-col justify-between">
+                  <span className="text-[10px] font-mono text-gray-400 uppercase tracking-widest">Précision BDD</span>
+                  <div className="mt-2">
+                    <div className="text-2xl font-black text-white tracking-tight">
+                      {totalListeningSeconds.toLocaleString('fr-FR')} <span className="text-xs font-mono text-gray-400 font-normal">sec</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 font-mono mt-0.5">
+                      Secondes réelles de lecture
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-black/40 border border-white/5 flex flex-col justify-between">
+                  <span className="text-[10px] font-mono text-gray-400 uppercase tracking-widest">Titres explorés</span>
+                  <div className="mt-2">
+                    <div className="text-2xl font-black text-white tracking-tight">
+                      {totalPlays} <span className="text-xs font-mono text-gray-400 font-normal">titres</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 font-mono mt-0.5">
+                      {recentTracks.length} récents • {likedTracks.length} likés
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-3.5 py-2.5 rounded-xl bg-white/[0.03] border border-white/5 text-[11px] text-gray-300 flex items-start gap-2">
+                <span className="text-emerald-400 font-bold shrink-0 mt-0.5">✓</span>
+                <span>
+                  <strong>Garantie temps d'écoute réel :</strong> Seules les secondes où la musique est effectivement en cours de lecture sont comptabilisées et enregistrées dans la base de données de votre profil (le temps passé inactif ou en pause sur l'application n'est pas pris en compte).
+                </span>
+              </div>
+            </div>
+
             {/* Top 5 Artists */}
             <div 
               className="p-6 rounded-3xl border border-white/10 shadow-xl space-y-4"
@@ -826,9 +969,26 @@ export default function ProfilePage() {
                               <span>Amis</span>
                             </span>
                           ) : isRequested ? (
-                            <span className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[10px] font-bold border border-amber-500/20">
-                              En attente
-                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[10px] font-bold border border-amber-500/20">
+                                En attente
+                              </span>
+                              {(() => {
+                                const outReq = pendingRequests.find(r => (r.user?.id || r.user?.uid) === uId && r.type === 'outgoing');
+                                if (outReq) {
+                                  return (
+                                    <button
+                                      onClick={() => cancelFriendRequest(outReq.id)}
+                                      className="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-all cursor-pointer"
+                                      title="Annuler la demande d'ami"
+                                    >
+                                      <X size={13} />
+                                    </button>
+                                  );
+                                }
+                                return null;
+                              })()}
+                            </div>
                           ) : (
                             <button
                               onClick={() => sendFriendRequest(u)}
@@ -887,22 +1047,31 @@ export default function ProfilePage() {
                         <button
                           onClick={() => acceptFriendRequest(req.id)}
                           className="p-2 rounded-xl bg-green-500/20 hover:bg-green-500/30 text-green-400 border border-green-500/30 transition-all cursor-pointer"
-                          title="Accepter"
+                          title="Accepter la demande d'ami"
                         >
                           <Check size={16} />
                         </button>
                         <button
                           onClick={() => declineFriendRequest(req.id)}
                           className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-all cursor-pointer"
-                          title="Refuser"
+                          title="Refuser la demande d'ami"
                         >
                           <X size={16} />
                         </button>
                       </div>
                     ) : (
-                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1 rounded-lg bg-white/5 border border-white/5">
-                        Demande envoyée
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                          Demande envoyée
+                        </span>
+                        <button
+                          onClick={() => cancelFriendRequest(req.id)}
+                          className="p-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-all cursor-pointer flex items-center justify-center"
+                          title="Annuler la demande d'ami"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -940,35 +1109,43 @@ export default function ProfilePage() {
                   >
                     <div className="flex items-center justify-between min-w-0">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="relative shrink-0">
-                          <img 
-                            src={friend.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'} 
-                            alt={friend.full_name} 
-                            className="w-12 h-12 rounded-full object-cover border-2 border-white/10 shadow-md"
-                          />
-                          <span 
-                            className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-black ${
-                              friend.status === 'online' || friend.status === 'listening' ? 'bg-emerald-500 animate-pulse' : 'bg-gray-500'
-                            }`}
-                          />
-                        </div>
+                        {(() => {
+                          const friendStatus = getEffectiveStatus(friend);
+                          const isLive = friendStatus === 'online' || friendStatus === 'listening';
+                          return (
+                            <>
+                              <div className="relative shrink-0">
+                                <img 
+                                  src={friend.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'} 
+                                  alt={friend.full_name} 
+                                  className="w-12 h-12 rounded-full object-cover border-2 border-white/10 shadow-md"
+                                />
+                                <span 
+                                  className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-black ${
+                                    isLive ? 'bg-emerald-500 animate-pulse' : 'bg-gray-500'
+                                  }`}
+                                />
+                              </div>
 
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <h4 className="text-xs font-black text-white truncate">{friend.full_name || friend.username}</h4>
-                            <span 
-                              className="text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider text-black shrink-0"
-                              style={{ backgroundColor: currentTheme.primary }}
-                            >
-                              Ami
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-gray-400 truncate">@{friend.username}</p>
-                          <p className="text-[9px] text-emerald-400/90 font-mono mt-0.5 flex items-center gap-1">
-                            <Activity size={10} />
-                            <span>{friend.status === 'online' ? 'En ligne' : friend.status === 'listening' ? 'En écoute' : 'Dernière activité récente'}</span>
-                          </p>
-                        </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <h4 className="text-xs font-black text-white truncate">{friend.full_name || friend.username}</h4>
+                                  <span 
+                                    className="text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider text-black shrink-0"
+                                    style={{ backgroundColor: currentTheme.primary }}
+                                  >
+                                    Ami
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-gray-400 truncate">@{friend.username}</p>
+                                <p className={`text-[9px] font-mono mt-0.5 flex items-center gap-1 ${isLive ? 'text-emerald-400/90' : 'text-gray-500'}`}>
+                                  <Activity size={10} />
+                                  <span>{friendStatus === 'online' ? 'En ligne' : friendStatus === 'listening' ? 'En écoute' : 'Hors ligne'}</span>
+                                </p>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
 
                       <button
@@ -1061,9 +1238,16 @@ export default function ProfilePage() {
                   style={selectedFriendFilter === null ? { borderColor: `${currentTheme.primary}40` } : {}}
                 >
                   <span className="text-xs font-bold">Tous les morceaux reçus</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-gray-300">
-                    {totalReceivedCount}
-                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {unreadReceivedTracksCount > 0 && (
+                      <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-red-500 text-white animate-pulse border border-red-400/40">
+                        {unreadReceivedTracksCount}
+                      </span>
+                    )}
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-gray-300">
+                      {totalReceivedCount}
+                    </span>
+                  </div>
                 </button>
 
                 {uniqueSenders.length === 0 ? (
@@ -1071,10 +1255,15 @@ export default function ProfilePage() {
                 ) : (
                   uniqueSenders.map((f) => {
                     const receivedCount = sharedTracks.filter(s => s.senderId === f.id && s.receiverId === currentUserId).length;
+                    const unreadForFriend = getUnreadCountForFriend(f.id);
+
                     return (
                       <button
                         key={f.id}
-                        onClick={() => setSelectedFriendFilter(f.id)}
+                        onClick={() => {
+                          setSelectedFriendFilter(f.id);
+                          markConversationAsRead(f.id);
+                        }}
                         className={`w-full p-3 rounded-2xl border transition-all flex items-center gap-3 text-left cursor-pointer ${
                           selectedFriendFilter === f.id
                             ? 'bg-white/10 border-white/20 text-white'
@@ -1088,24 +1277,34 @@ export default function ProfilePage() {
                             alt={f.full_name || f.username} 
                             className="w-8 h-8 rounded-full object-cover border border-white/10"
                           />
-                          <span 
-                            className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${
-                              f.status === 'online' || f.status === 'listening' ? 'bg-emerald-500' : 'bg-gray-500'
-                            }`}
-                          />
+                          {(() => {
+                            const isLive = getEffectiveStatus(f) === 'online' || getEffectiveStatus(f) === 'listening';
+                            return (
+                              <span 
+                                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${
+                                  isLive ? 'bg-emerald-500' : 'bg-gray-500'
+                                }`}
+                              />
+                            );
+                          })()}
                         </div>
                         <div className="min-w-0 flex-1">
                           <h4 className="text-xs font-bold truncate text-white">{f.full_name || f.username}</h4>
                           <p className="text-[9px] text-gray-500 font-mono truncate">@{f.username}</p>
                         </div>
-                        {receivedCount > 0 && (
+                        {unreadForFriend > 0 ? (
                           <span 
-                            className="text-[9px] font-mono px-2 py-0.5 rounded-full font-bold text-black shrink-0"
-                            style={{ backgroundColor: currentTheme.primary }}
+                            className="text-[9px] font-mono px-2 py-0.5 rounded-full font-black text-white bg-red-500 shrink-0 animate-pulse border border-red-400/40"
+                          >
+                            {unreadForFriend}
+                          </span>
+                        ) : receivedCount > 0 ? (
+                          <span 
+                            className="text-[9px] font-mono px-2 py-0.5 rounded-full font-bold text-gray-400 bg-white/5 shrink-0"
                           >
                             {receivedCount}
                           </span>
-                        )}
+                        ) : null}
                       </button>
                     );
                   })
@@ -1137,19 +1336,37 @@ export default function ProfilePage() {
                   </p>
                 </div>
 
-                {selectedFriendFilter && (
-                  <button
-                    onClick={() => {
-                      const targetFriend = uniqueSenders.find(u => u.id === selectedFriendFilter);
-                      if (targetFriend) setSelectedFriendForModal(targetFriend);
-                    }}
-                    className="self-start sm:self-center px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md transition-transform hover:scale-105 active:scale-95"
-                    style={{ backgroundColor: currentTheme.primary, color: '#000000' }}
-                  >
-                    <Send size={11} />
-                    <span>Envoyer un morceau</span>
-                  </button>
-                )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {unreadReceivedTracksCount > 0 && (
+                    <button
+                      onClick={() => {
+                        if (selectedFriendFilter) {
+                          markConversationAsRead(selectedFriendFilter);
+                        } else {
+                          markAllReceivedAsRead();
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-gray-200 border border-white/10 transition-all cursor-pointer shadow-sm"
+                    >
+                      <Check size={12} className="text-emerald-400" />
+                      <span>Tout marquer comme lu</span>
+                    </button>
+                  )}
+
+                  {selectedFriendFilter && (
+                    <button
+                      onClick={() => {
+                        const targetFriend = uniqueSenders.find(u => u.id === selectedFriendFilter);
+                        if (targetFriend) setSelectedFriendForModal(targetFriend);
+                      }}
+                      className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md transition-transform hover:scale-105 active:scale-95"
+                      style={{ backgroundColor: currentTheme.primary, color: '#000000' }}
+                    >
+                      <Send size={11} />
+                      <span>Envoyer un morceau</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* 3. ADAPTATION DE LA BULLE D'ÉTAT VIDE */}
@@ -1177,6 +1394,7 @@ export default function ProfilePage() {
                 <div className="space-y-4 max-h-[550px] overflow-y-auto pr-1 no-scrollbar">
                   {filteredShares.map((share) => {
                     const isSentByMe = share.senderId === currentUserId;
+                    const isUnread = !isSentByMe && share.receiverId === currentUserId && !isShareRead(share.id);
                     const senderName = isSentByMe ? "Vous" : (share.sender.full_name || share.sender.username);
                     const senderAvatar = isSentByMe 
                       ? (profile?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100') 
@@ -1185,36 +1403,47 @@ export default function ProfilePage() {
                     return (
                       <div 
                         key={share.id}
-                        className={`p-4 rounded-2xl border transition-all space-y-3 ${
-                          selectedFriendFilter 
-                            ? isSentByMe 
-                              ? 'ml-auto max-w-[85%] sm:max-w-[75%] bg-indigo-950/20 border-indigo-500/20 hover:border-indigo-500/30' 
-                              : 'mr-auto max-w-[85%] sm:max-w-[75%] bg-black/40 border-white/10 hover:border-white/20'
-                            : 'w-full bg-black/40 border border-white/10 hover:border-white/20'
+                        onClick={() => {
+                          if (isUnread) markShareAsRead(share.id);
+                        }}
+                        className={`p-4 rounded-2xl border transition-all space-y-3 relative ${
+                          isUnread
+                            ? 'border-red-500/40 bg-red-950/10 shadow-lg shadow-red-500/5'
+                            : selectedFriendFilter 
+                              ? isSentByMe 
+                                ? 'ml-auto max-w-[85%] sm:max-w-[75%] bg-indigo-950/20 border-indigo-500/20 hover:border-indigo-500/30' 
+                                : 'mr-auto max-w-[85%] sm:max-w-[75%] bg-black/40 border-white/10 hover:border-white/20'
+                              : 'w-full bg-black/40 border border-white/10 hover:border-white/20'
                         }`}
                       >
                         {/* Sender Header */}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                              <div 
-                                className="relative cursor-pointer group"
-                                onClick={() => setSelectedFriendForModal(share.sender)}
-                              >
-                                <img 
-                                  src={senderAvatar} 
-                                  alt={senderName} 
-                                  className="w-7 h-7 rounded-full object-cover border border-white/20 group-hover:border-white/40 transition-all"
-                                />
-                                <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                  <Eye size={10} className="text-white" />
-                                </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div 
+                              className="relative cursor-pointer group"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedFriendForModal(share.sender);
+                              }}
+                            >
+                              <img 
+                                src={senderAvatar} 
+                                alt={senderName} 
+                                className="w-7 h-7 rounded-full object-cover border border-white/20 group-hover:border-white/40 transition-all"
+                              />
+                              <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                <Eye size={10} className="text-white" />
                               </div>
-                              <span 
-                                className="text-xs font-bold text-white cursor-pointer hover:underline"
-                                onClick={() => setSelectedFriendForModal(share.sender)}
-                              >
-                                {senderName}
-                              </span>
+                            </div>
+                            <span 
+                              className="text-xs font-bold text-white cursor-pointer hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedFriendForModal(share.sender);
+                              }}
+                            >
+                              {senderName}
+                            </span>
                             <span className="text-[10px] text-gray-500 font-mono">
                               {isSentByMe ? "avez recommandé :" : "a recommandé :"}
                             </span>
@@ -1231,49 +1460,124 @@ export default function ProfilePage() {
                                 {isSentByMe ? "Envoyé" : "Reçu"}
                               </span>
                             )}
+
+                            {/* Unread Pill */}
+                            {isUnread && (
+                              <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-black uppercase tracking-wider animate-pulse shadow-sm">
+                                Nouveau
+                              </span>
+                            )}
                           </div>
 
-                          <span className="text-[9px] font-mono text-gray-500">
-                            {new Date(share.createdAt).toLocaleDateString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {isUnread && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  markShareAsRead(share.id);
+                                }}
+                                title="Marquer comme lu"
+                                className="text-[9px] font-mono text-gray-400 hover:text-emerald-400 flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+                              >
+                                <Check size={10} />
+                                <span>Lu</span>
+                              </button>
+                            )}
+                            <span className="text-[9px] font-mono text-gray-500">
+                              {new Date(share.createdAt).toLocaleDateString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
                         </div>
 
-                        {/* Micro-message Bubble */}
-                        {share.message && (
-                          <div className="p-3 rounded-xl bg-white/5 border border-white/5 text-xs text-gray-200 italic flex items-start gap-2">
-                            <MessageSquare size={13} className="shrink-0 mt-0.5 text-amber-400" />
-                            <span>"{share.message}"</span>
+                        {/* Micro-message Bubble or Track Card */}
+                        {share.isTextMessage || !share.track ? (
+                          <div className={`p-3.5 rounded-2xl text-xs leading-relaxed shadow-md ${
+                            isSentByMe 
+                              ? 'bg-gradient-to-r from-[#c29e5a] to-[#d6b068] text-black font-medium rounded-tr-none' 
+                              : 'bg-white/10 text-white rounded-tl-none border border-white/10'
+                          }`}>
+                            {share.message}
                           </div>
-                        )}
+                        ) : (
+                          <>
+                            {share.message && (
+                              <div className="p-3 rounded-xl bg-white/5 border border-white/5 text-xs text-gray-200 italic flex items-start gap-2">
+                                <MessageSquare size={13} className="shrink-0 mt-0.5 text-amber-400" />
+                                <span>"{share.message}"</span>
+                              </div>
+                            )}
 
-                        {/* Track Card with Play Action */}
-                        <div className="flex items-center justify-between p-3 rounded-xl bg-black/60 border border-white/10 group">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <img 
-                              src={share.track.thumbnail} 
-                              alt={share.track.title} 
-                              className="w-11 h-11 rounded-lg object-cover border border-white/10 shrink-0"
-                              onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200'; }}
-                            />
-                            <div className="min-w-0">
-                              <h4 className="text-xs font-black text-white truncate">{share.track.title}</h4>
-                              <p className="text-[11px] text-gray-400 truncate">{share.track.artist}</p>
+                            {/* Track Card with Play Action */}
+                            <div className="flex items-center justify-between p-3 rounded-xl bg-black/60 border border-white/10 group">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <img 
+                                  src={share.track.thumbnail} 
+                                  alt={share.track.title} 
+                                  className="w-11 h-11 rounded-lg object-cover border border-white/10 shrink-0"
+                                  onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200'; }}
+                                />
+                                <div className="min-w-0">
+                                  <h4 className="text-xs font-black text-white truncate">{share.track.title}</h4>
+                                  <p className="text-[11px] text-gray-400 truncate">{share.track.artist}</p>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isUnread) markShareAsRead(share.id);
+                                  play(share.track);
+                                }}
+                                className="px-3 py-2 rounded-xl font-bold text-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer shrink-0"
+                                style={{ backgroundColor: currentTheme.primary }}
+                              >
+                                <Play size={14} fill="currentColor" />
+                                <span>Écouter</span>
+                              </button>
                             </div>
-                          </div>
-
-                          <button
-                            onClick={() => play(share.track)}
-                            className="px-3 py-2 rounded-xl font-bold text-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer shrink-0"
-                            style={{ backgroundColor: currentTheme.primary }}
-                          >
-                            <Play size={14} fill="currentColor" />
-                            <span>Écouter</span>
-                          </button>
-                        </div>
+                          </>
+                        )}
                       </div>
                     );
                   })}
                 </div>
+              )}
+
+              {/* Chat Input Form when a friend is selected */}
+              {selectedFriendFilter && (
+                <form 
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!chatInput.trim() || !selectedFriendFilter) return;
+                    setSendingMessage(true);
+                    try {
+                      await sendMessageToFriend(selectedFriendFilter, chatInput);
+                      setChatInput('');
+                    } catch (err) {
+                      console.error(err);
+                    } finally {
+                      setSendingMessage(false);
+                    }
+                  }} 
+                  className="flex items-center gap-2 pt-4 border-t border-white/10 mt-4"
+                >
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Écrire un message texte..."
+                    className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-white/30"
+                  />
+                  <button
+                    type="submit"
+                    disabled={sendingMessage || !chatInput.trim()}
+                    className="px-5 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-transform active:scale-95 shrink-0 shadow-md"
+                    style={{ backgroundColor: currentTheme.primary, color: '#000' }}
+                  >
+                    <Send size={13} />
+                    <span>Envoyer</span>
+                  </button>
+                </form>
               )}
             </div>
           </div>

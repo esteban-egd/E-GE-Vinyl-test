@@ -42,16 +42,12 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
 
   const isGuest = !user || user.is_guest;
   
-  const rawDisplayName = profile?.full_name?.trim() || profile?.username?.trim();
-  const rawUsername = profile?.username?.trim();
+  const rawDisplayName = profile?.full_name?.trim() || user?.user_metadata?.full_name?.trim();
+  const rawUsername = profile?.username?.trim() || user?.user_metadata?.username?.trim() || (user?.email ? user.email.split('@')[0] : 'membre');
   
-  // Rule: Use profile.full_name / profile.username, never split email if profile exists
-  const userTitle = profile 
-    ? (rawDisplayName || rawUsername || 'Membre E-GE') 
-    : (user?.email ? user.email.split('@')[0] : 'Utilisateur');
-  
+  const userTitle = rawDisplayName || rawUsername || (user?.email ? user.email.split('@')[0] : 'Membre E-GE');
   const displayName = isGuest ? 'Invitations E-GE' : userTitle;
-  const userSubtext = isGuest ? 'Mode Invité' : (rawUsername && rawUsername !== userTitle ? `@${rawUsername.replace('@', '')}` : null);
+  const userSubtext = isGuest ? 'Mode Invité' : `@${rawUsername.replace('@', '')}`;
   const avatarUrl = isGuest ? '' : profile?.avatar_url;
 
   const handleProfileClick = (e) => {
@@ -135,7 +131,7 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
                   </div>
                 )}
               </div>
-              <div className="flex flex-col items-start leading-none min-w-0">
+              <div className="flex flex-col items-start leading-tight min-w-0">
                 <div className="flex items-center gap-1.5 max-w-[110px] sm:max-w-xs">
                   <span className="text-xs font-black text-white uppercase tracking-tighter truncate">
                     {displayName}
@@ -145,7 +141,7 @@ export default function Header({ onOpenMobileMenu = () => {} }) {
                   </span>
                 </div>
                 {userSubtext && (
-                  <span className="text-[9px] font-bold uppercase tracking-widest mt-0.5 truncate max-w-[90px] sm:max-w-xs text-red-400/90">
+                  <span className="text-[9.5px] font-medium font-mono text-neutral-400 truncate max-w-[90px] sm:max-w-xs">
                     {userSubtext}
                   </span>
                 )}

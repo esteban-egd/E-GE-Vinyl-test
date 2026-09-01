@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, Heart, Disc, Sparkles, Send, Lock, Play, 
-  Search, Check, Music, Radio, Activity, Globe, Users, UserPlus
+  Search, Check, Music, Radio, Activity, Globe, Users, UserPlus, MessageSquare, Clock
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useSocial } from '../../context/SocialContext';
@@ -10,15 +10,27 @@ import { useAudio } from '../../context/AudioContext';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
 import { searchOfficialDeezerArtist } from '../../services/artistService';
+import { searchDeezerUnified } from '../../services/searchService';
+import { getEffectiveStatus, formatListeningTime } from '../../services/userBddService';
 import { toast } from 'react-hot-toast';
 
 export default function UserProfileModal({ friend, isOpen, onClose }) {
   const { currentTheme } = useTheme();
   const { user } = useAuth();
-  const { friends, shareTrackWithFriend, sendFriendRequest, pendingRequests } = useSocial();
+  const { 
+    friends, 
+    shareTrackWithFriend, 
+    sendMessageToFriend, 
+    sendFriendRequest, 
+    cancelFriendRequest, 
+    pendingRequests, 
+    sharedTracks 
+  } = useSocial();
   const { play } = useAudio();
 
-  const [activeTab, setActiveTab] = useState('likes'); // 'likes' | 'playlists' | 'artists'
+  const [activeTab, setActiveTab] = useState('likes'); // 'likes' | 'playlists' | 'artists' | 'messages'
+  const [chatInput, setChatInput] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
   
   // Data states
   const [likedTracks, setLikedTracks] = useState([]);
@@ -66,6 +78,14 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const targetId = getUserId(friend);
   const isMe = currentUserId && targetId && String(currentUserId) === String(targetId);
 
+  const conversationItems = (sharedTracks || []).filter(item => {
+    const sId = String(item.senderId);
+    const rId = String(item.receiverId);
+    const cId = String(currentUserId);
+    const tId = String(targetId);
+    return (sId === cId && rId === tId) || (sId === tId && rId === cId);
+  }).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
   // Determine friendship status - friends in context are profile objects
   const isFriend = isMe || (Array.isArray(friends) && friends.some(f => {
     const fId = f.id || f.uid;
@@ -76,6 +96,11 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
     const rUserId = r.user?.id || r.user?.uid || r.user_id;
     return rUserId && targetId && String(rUserId).toLowerCase() === String(targetId).toLowerCase();
   }));
+
+  const outgoingPendingRequest = !isMe && !isFriend && Array.isArray(pendingRequests) && pendingRequests.find(r => {
+    const rUserId = r.user?.id || r.user?.uid || r.user_id;
+    return rUserId && targetId && String(rUserId).toLowerCase() === String(targetId).toLowerCase() && r.type === 'outgoing';
+  });
 
   // Actual profile to use (prefer freshly fetched)
   const activeProfile = profileData || friend;
@@ -245,21 +270,74 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
 
   // Search tracks to share
   const handleTrackSearch = async (e) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
+    if (e && e.preventDefault) e.preventDefault();
+    const q = searchQuery.trim();
+    if (!q) return;
 
     setSearching(true);
     try {
-      const response = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
-      const data = await response.json();
-      setSearchResults(data?.tracks || data || []);
+      // 1. Unified search (Deezer / iTunes)
+      const data = await searchDeezerUnified(q);
+      if (data && Array.isArray(data.tracks) && data.tracks.length > 0) {
+        setSearchResults(data.tracks);
+      } else {
+        // Fallback to youtube-search
+        const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(q)}`);
+        if (response.ok) {
+          const ytData = await response.json();
+          setSearchResults(Array.isArray(ytData) ? ytData : []);
+        } else {
+          setSearchResults([]);
+        }
+      }
     } catch (err) {
-      console.error("Error searching tracks in modal:", err);
-      toast.error("Erreur de recherche.");
+      console.warn("Track search error, falling back:", err);
+      try {
+        const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(q)}`);
+        if (response.ok) {
+          const ytData = await response.json();
+          setSearchResults(Array.isArray(ytData) ? ytData : []);
+        } else {
+          setSearchResults([]);
+        }
+      } catch (_) {
+        setSearchResults([]);
+      }
     } finally {
       setSearching(false);
     }
   };
+
+  // Live auto-search when typing
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q || !showSharePanel || selectedTrack) {
+      if (!q) setSearchResults([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const data = await searchDeezerUnified(q);
+        if (data && Array.isArray(data.tracks) && data.tracks.length > 0) {
+          setSearchResults(data.tracks);
+        } else {
+          const response = await fetch(`/api/youtube-search?q=${encodeURIComponent(q)}`);
+          if (response.ok) {
+            const ytData = await response.json();
+            setSearchResults(Array.isArray(ytData) ? ytData : []);
+          }
+        }
+      } catch (_) {
+        // silent fallback
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, showSharePanel, selectedTrack]);
 
   // Share track
   const handleShareTrack = async () => {
@@ -293,6 +371,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   if (!isOpen || !friend) return null;
 
   const displayUser = activeProfile || friend;
+  const effectiveStatus = getEffectiveStatus(displayUser);
 
   return (
     <AnimatePresence>
@@ -326,7 +405,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                 />
                 <span 
                   className={`absolute bottom-1 right-1 w-4.5 h-4.5 rounded-full border-4 border-black ${
-                    displayUser.status === 'online' || displayUser.status === 'listening' ? 'bg-emerald-500 animate-pulse' : 'bg-gray-500'
+                    effectiveStatus === 'online' || effectiveStatus === 'listening' ? 'bg-emerald-500 animate-pulse' : 'bg-gray-500'
                   }`}
                 />
               </div>
@@ -345,13 +424,20 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                 </div>
                 <p className="text-xs text-gray-400 font-mono">@{displayUser.username}</p>
                 
-                <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-xs mt-1">
+                <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 text-xs mt-1">
                   <span className="flex items-center gap-1.5 text-gray-400">
                     <Activity size={13} style={{ color: currentTheme.primary }} />
-                    <span className="capitalize">{displayUser.status === 'listening' ? 'En écoute' : displayUser.status === 'online' ? 'En ligne' : 'Inactif'}</span>
+                    <span className="capitalize">{effectiveStatus === 'listening' ? 'En écoute' : effectiveStatus === 'online' ? 'En ligne' : 'Inactif'}</span>
                   </span>
                   
-                  {displayUser.current_track && (
+                  {Number(displayUser.total_listening_seconds || 0) > 0 && (
+                    <span className="flex items-center gap-1.5 text-gray-300 font-mono text-[10px] bg-white/5 px-2.5 py-0.5 rounded-lg border border-white/5">
+                      <Clock size={12} style={{ color: currentTheme.primary }} />
+                      <span>{formatListeningTime(displayUser.total_listening_seconds)} d'écoute</span>
+                    </span>
+                  )}
+
+                  {displayUser.current_track && effectiveStatus === 'listening' && (
                     <span className="text-emerald-400 font-medium flex items-center gap-1.5 animate-pulse truncate max-w-[250px]">
                       <Radio size={13} />
                       <span className="truncate">Écoute : <strong>{displayUser.current_track}</strong></span>
@@ -374,11 +460,22 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                 ) : (
                   <>
                     {isRequested ? (
-                      <div 
-                        className="w-full md:w-auto px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 bg-white/10 text-gray-400 border border-white/10"
-                      >
-                        <Check size={14} />
-                        <span>Demande envoyée</span>
+                      <div className="flex items-center gap-2">
+                        <div 
+                          className="flex-1 md:flex-initial px-4 py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                        >
+                          <Check size={14} />
+                          <span>Demande envoyée</span>
+                        </div>
+                        {outgoingPendingRequest && (
+                          <button
+                            onClick={() => cancelFriendRequest(outgoingPendingRequest.id)}
+                            className="p-3 rounded-2xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-all cursor-pointer flex items-center justify-center shadow-md"
+                            title="Annuler la demande d'ami"
+                          >
+                            <X size={16} />
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <button
@@ -518,7 +615,8 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
             {[
               { id: 'likes', label: `Titres Likés (${likedTracks.length})`, icon: Heart, privacy: privacyLikes },
               { id: 'playlists', label: `Playlists (${playlists.length})`, icon: Disc, privacy: privacyPlaylists },
-              { id: 'artists', label: 'Top Artistes', icon: Sparkles, privacy: privacyArtists }
+              { id: 'artists', label: 'Top Artistes', icon: Sparkles, privacy: privacyArtists },
+              { id: 'messages', label: `Messages (${conversationItems.length})`, icon: MessageSquare, privacy: 'public' }
             ].map(({ id, label, icon: Icon, privacy }) => (
               <button
                 key={id}
@@ -673,6 +771,109 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                         ))}
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* 4. MESSAGES TAB */}
+                {activeTab === 'messages' && (
+                  <div className="flex flex-col h-full space-y-3">
+                    <div className="flex-1 space-y-3 overflow-y-auto max-h-[350px] pr-1">
+                      {conversationItems.length === 0 ? (
+                        <div className="py-12 text-center text-xs text-gray-400">
+                          Aucun message ou morceau partagé pour l'instant. Envoyez un premier message texte ou un morceau !
+                        </div>
+                      ) : (
+                        conversationItems.map((item) => {
+                          const isMe = String(item.senderId) === String(currentUserId);
+                          return (
+                            <div 
+                              key={item.id} 
+                              className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1`}
+                            >
+                              <div className="flex items-center gap-1.5 text-[9px] text-gray-400 px-1 font-mono">
+                                <span>{isMe ? 'Vous' : (item.sender?.full_name || item.sender?.username || 'Ami')}</span>
+                                <span>•</span>
+                                <span>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                              </div>
+
+                              {item.isTextMessage || !item.track ? (
+                                <div 
+                                  className={`max-w-[80%] p-3 rounded-2xl text-xs leading-relaxed shadow-md ${
+                                    isMe 
+                                      ? 'bg-gradient-to-r from-[#c29e5a] to-[#d6b068] text-black font-medium rounded-tr-none' 
+                                      : 'bg-white/10 text-white rounded-tl-none border border-white/10'
+                                  }`}
+                                >
+                                  {item.message}
+                                </div>
+                              ) : (
+                                <div className={`w-full max-w-[85%] p-3 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-2.5 ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <img 
+                                        src={item.track.thumbnail} 
+                                        alt={item.track.title} 
+                                        className="w-10 h-10 rounded-lg object-cover border border-white/15 shrink-0"
+                                      />
+                                      <div className="min-w-0">
+                                        <h4 className="text-xs font-bold text-white truncate">{item.track.title}</h4>
+                                        <p className="text-[10px] text-gray-400 truncate">{item.track.artist}</p>
+                                      </div>
+                                    </div>
+                                    <button
+                                      onClick={() => play(item.track)}
+                                      className="p-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-all cursor-pointer shrink-0"
+                                      title="Écouter"
+                                    >
+                                      <Play size={13} fill="currentColor" />
+                                    </button>
+                                  </div>
+                                  {item.message && (
+                                    <p className="text-xs text-gray-300 italic bg-black/20 p-2 rounded-xl border border-white/5">
+                                      "{item.message}"
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <form 
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!chatInput.trim() || !targetId) return;
+                        setSendingMessage(true);
+                        try {
+                          await sendMessageToFriend(targetId, chatInput);
+                          setChatInput('');
+                        } catch (err) {
+                          console.error(err);
+                        } finally {
+                          setSendingMessage(false);
+                        }
+                      }} 
+                      className="flex items-center gap-2 pt-3 border-t border-white/10"
+                    >
+                      <input
+                        type="text"
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        placeholder="Écrire un message texte..."
+                        className="flex-1 px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-white/30"
+                      />
+                      <button
+                        type="submit"
+                        disabled={sendingMessage || !chatInput.trim()}
+                        className="px-4 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-transform active:scale-95"
+                        style={{ backgroundColor: currentTheme.primary, color: '#000' }}
+                      >
+                        <Send size={13} />
+                        <span>Envoyer</span>
+                      </button>
+                    </form>
                   </div>
                 )}
               </>

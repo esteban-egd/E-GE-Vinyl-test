@@ -474,7 +474,7 @@ export default function SearchPage() {
                   {artistList.map((artist, idx) => (
                     <div
                       key={`artist-grid-tab-${artist.id || idx}`}
-                      onClick={() => navigate(`/artist/${encodeURIComponent(artist.name)}`)}
+                      onClick={() => navigate(`/artist/${encodeURIComponent(artist.name)}${artist.id ? `?id=${artist.id}` : ''}`)}
                       className="p-4 rounded-2xl bg-[#14110c] hover:bg-[#1c1812] border border-white/5 hover:border-white/15 transition-all duration-300 group cursor-pointer hover:-translate-y-1 hover:shadow-xl flex flex-col items-center text-center"
                     >
                       <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full p-1 border border-white/15 group-hover:border-[#1DB954]/50 transition-all duration-300 shadow-xl mb-3">
@@ -592,7 +592,7 @@ export default function SearchPage() {
                     {artistList.map((artist, idx) => (
                       <div
                         key={`artist-top-bar-${artist.id || idx}`}
-                        onClick={() => navigate(`/artist/${encodeURIComponent(artist.name)}`)}
+                        onClick={() => navigate(`/artist/${encodeURIComponent(artist.name)}${artist.id ? `?id=${artist.id}` : ''}`)}
                         className="flex flex-col items-center group cursor-pointer shrink-0 transition-all duration-300 hover:-translate-y-1 active:scale-95"
                         style={{ width: '100px' }}
                       >
@@ -647,7 +647,7 @@ export default function SearchPage() {
                       /* 👤 CARTE HERO ARTISTE */
                       <div 
                         id="search-hero-artist-card"
-                        onClick={() => navigate(`/artist/${encodeURIComponent(topMatch.data.name)}`)}
+                        onClick={() => navigate(`/artist/${encodeURIComponent(topMatch.data.name)}${topMatch.data.id ? `?id=${topMatch.data.id}` : ''}`)}
                         className="group relative p-6 rounded-3xl bg-[#14110c] hover:bg-[#1a160f] border border-white/10 hover:border-white/20 transition-all duration-300 cursor-pointer overflow-hidden shadow-2xl flex flex-col justify-between hover:shadow-black/60 hover:-translate-y-0.5 active:scale-[0.99] min-h-[260px]"
                         style={{
                           background: `linear-gradient(145deg, ${currentTheme.bgAccent} 0%, #14110c 100%)`

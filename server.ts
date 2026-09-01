@@ -81,58 +81,7 @@ async function startServer() {
         return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
       };
 
-      // 1. YouTube Web Search (videoRenderer)
-      try {
-        const ytRes = await fetch("https://www.youtube.com/youtubei/v1/search", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-          },
-          body: JSON.stringify({
-            context: {
-              client: {
-                clientName: "WEB",
-                clientVersion: "2.20240101.00.00",
-                hl: "fr",
-                gl: "FR"
-              }
-            },
-            query: q
-          })
-        });
-
-        if (ytRes.ok) {
-          const data = await ytRes.json();
-          const contents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
-          for (const section of contents) {
-            const itemContents = section?.itemSectionRenderer?.contents || [];
-            for (const item of itemContents) {
-              const v = item?.videoRenderer;
-              if (v && v.videoId && !seenIds.has(v.videoId)) {
-                seenIds.add(v.videoId);
-                const title = v.title?.runs?.[0]?.text || v.title?.simpleText || '';
-                const artist = v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || '';
-                const thumb = v.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
-                const lengthText = v.lengthText?.simpleText || v.lengthText?.runs?.[0]?.text || '';
-                const duration = parseDurationStr(lengthText) || parseDurationStr(artist);
-                tracks.push({
-                  id: v.videoId,
-                  videoId: v.videoId,
-                  title,
-                  artist,
-                  thumbnail: thumb,
-                  ...(duration > 0 ? { duration } : {})
-                });
-              }
-            }
-          }
-        }
-      } catch (err: any) {
-        console.warn("[Server] YT WEB Search error:", err.message);
-      }
-
-      // 2. YouTube Music Search (WEB_REMIX)
+      // 1. YouTube Music Search (WEB_REMIX) - PRIORITÉ ABSOLUE pour les versions officielles studio
       try {
         const ytmRes = await fetch("https://music.youtube.com/youtubei/v1/search", {
           method: "POST",
@@ -165,7 +114,7 @@ async function startServer() {
           }
 
           for (const section of sections) {
-            // Check musicCardShelfRenderer (Top Result)
+            // Check musicCardShelfRenderer (Top Result officiel)
             const card = section?.musicCardShelfRenderer;
             if (card) {
               const videoId = card.buttons?.find((b: any) => b?.buttonRenderer?.command?.watchEndpoint?.videoId)?.buttonRenderer?.command?.watchEndpoint?.videoId ||
@@ -176,18 +125,21 @@ async function startServer() {
                 const title = card.title?.runs?.[0]?.text || '';
                 const subtitleStr = card.subtitle?.runs?.map((r: any) => r.text).join('') || '';
                 const duration = parseDurationStr(subtitleStr);
-                tracks.unshift({
+                const isTopic = subtitleStr.toLowerCase().includes('topic') || subtitleStr.toLowerCase().includes('auto-generated');
+                tracks.push({
                   id: videoId,
                   videoId,
                   title,
                   artist: subtitleStr,
                   thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+                  isTopic,
+                  isOfficial: true,
                   ...(duration > 0 ? { duration } : {})
                 });
               }
             }
 
-            // Check musicShelfRenderer
+            // Check musicShelfRenderer (Titres officiels de YouTube Music)
             const items = section?.musicShelfRenderer?.contents || [];
             for (const item of items) {
               const r = item?.musicResponsiveListItemRenderer;
@@ -204,12 +156,15 @@ async function startServer() {
                 const artist = artistRuns.map((a: any) => a.text).join('') || '';
                 const fixedColText = r.fixedColumns?.[0]?.musicResponsiveListItemFixedColumnRenderer?.text?.runs?.[0]?.text || '';
                 const duration = parseDurationStr(fixedColText) || parseDurationStr(artist);
+                const isTopic = artist.toLowerCase().includes('topic') || artist.toLowerCase().includes('auto-generated');
                 tracks.push({
                   id: videoId,
                   videoId,
                   title,
                   artist,
                   thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+                  isTopic,
+                  isOfficial: true,
                   ...(duration > 0 ? { duration } : {})
                 });
               }
@@ -220,6 +175,68 @@ async function startServer() {
         console.warn("[Server] YTM Search error:", err.message);
       }
 
+      // 2. YouTube Web Search (videoRenderer) en repli
+      try {
+        const ytRes = await fetch("https://www.youtube.com/youtubei/v1/search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+          },
+          body: JSON.stringify({
+            context: {
+              client: {
+                clientName: "WEB",
+                clientVersion: "2.20240101.00.00",
+                hl: "fr",
+                gl: "FR"
+              }
+            },
+            query: q
+          })
+        });
+
+        if (ytRes.ok) {
+          const data = await ytRes.json();
+          const contents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+          for (const section of contents) {
+            const itemContents = section?.itemSectionRenderer?.contents || [];
+            for (const item of itemContents) {
+              const v = item?.videoRenderer;
+              if (v && v.videoId && !seenIds.has(v.videoId)) {
+                const title = v.title?.runs?.[0]?.text || v.title?.simpleText || '';
+                const artist = v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || '';
+                
+                // Filtrer les tutoriels ou covers évidents si la requête ne le demande pas
+                const titleLower = title.toLowerCase();
+                const qLower = q.toLowerCase();
+                const isCover = /\b(cover|reprise|karaoke|instrumental|reaction|remake|parody|tutorial|lesson)\b/i.test(titleLower) &&
+                                !/\b(cover|reprise|karaoke|instrumental|remake)\b/i.test(qLower);
+
+                if (!isCover) {
+                  seenIds.add(v.videoId);
+                  const thumb = v.thumbnail?.thumbnails?.slice(-1)[0]?.url || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`;
+                  const lengthText = v.lengthText?.simpleText || v.lengthText?.runs?.[0]?.text || '';
+                  const duration = parseDurationStr(lengthText) || parseDurationStr(artist);
+                  const isTopic = artist.toLowerCase().includes('topic') || artist.toLowerCase().includes('auto-generated');
+                  tracks.push({
+                    id: v.videoId,
+                    videoId: v.videoId,
+                    title,
+                    artist,
+                    thumbnail: thumb,
+                    isTopic,
+                    ...(duration > 0 ? { duration } : {})
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn("[Server] YT WEB Search error:", err.message);
+      }
+
       res.json(tracks);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -227,7 +244,7 @@ async function startServer() {
   });
 
   // Search Proxy using 100% Public Deezer API (No Client ID / Secret required)
-  app.get(["/api/deezer-search-all", "/api/spotify-search"], async (req, res) => {
+  app.get(["/api/deezer-search-all", "/api/spotify-search", "/api/search"], async (req, res) => {
     try {
       const q = (req.query.q as string || "").trim();
       if (!q) return res.status(400).json({ error: "Missing query q" });
@@ -656,6 +673,9 @@ async function startServer() {
 
   // Dedicated Audio Stream / Download Proxy (CORS-free for offline caching)
   
+  // In-memory cache for resolved stream URLs to make playback instantaneous (TTL: 15 minutes)
+  const streamUrlCache = new Map<string, { url: string; contentType: string; expiresAt: number }>();
+
   // Unified Full-Track Audio Stream & Download Proxy (CORS-free for offline caching & mobile playback)
   app.get(['/api/audio-download', '/api/stream', '/api/download'], async (req, res) => {
     try {
@@ -666,7 +686,7 @@ async function startServer() {
       
       let videoId = id;
       
-      // If we don't have an ID but have a query (or title+artist), we search Invidious first
+      // If we don't have an ID but have a query (or title+artist), search YouTube first
       if (!videoId) {
         const queryTerm = queryParam || `${title} ${artist}`.trim();
         if (!queryTerm) {
@@ -681,7 +701,7 @@ async function startServer() {
         
         for (const url of invSearchUrls) {
           try {
-            const sRes = await fetch(url, { signal: AbortSignal.timeout(3000) });
+            const sRes = await fetch(url, { signal: AbortSignal.timeout(2500) });
             if (sRes.ok) {
               const data = await sRes.json();
               if (data && data.length > 0 && data[0].videoId) {
@@ -700,36 +720,44 @@ async function startServer() {
       let audioStreamUrl: string | null = null;
       let contentType = 'audio/webm';
 
-      // 1. Invidious Video API for FULL Audio Stream
-      const invidiousInstances = [
-        'https://invidious.nerdvpn.de',
-        'https://inv.tux.pizza',
-        'https://invidious.jing.rocks',
-        'https://yt.artemislena.eu',
-        'https://invidious.projectsegfau.lt'
-      ];
-
-      for (const inst of invidiousInstances) {
-        try {
-          const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
-            signal: AbortSignal.timeout(3500)
-          });
-          if (invRes.ok) {
-            const invData = await invRes.json();
-            const audioFormats = invData.adaptiveFormats?.filter((f: any) => f.url && f.mimeType?.startsWith('audio/')) || [];
-            if (audioFormats.length > 0) {
-              audioFormats.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-              audioStreamUrl = audioFormats[0].url;
-              contentType = audioFormats[0].mimeType || 'audio/webm';
-              break;
-            }
-          }
-        } catch (_) {}
+      // Check cache first
+      const cached = streamUrlCache.get(videoId);
+      if (cached && cached.expiresAt > Date.now()) {
+        audioStreamUrl = cached.url;
+        contentType = cached.contentType;
       }
 
-      // 2. Cobalt API Fallback for FULL audio
       if (!audioStreamUrl) {
-        try {
+        // Run parallel resolvers to pick the fastest healthy audio source
+        const resolverPromises: Promise<{ url: string; mimeType: string }>[] = [];
+
+        // 1. Invidious Mirrors in parallel
+        const invidiousInstances = [
+          'https://invidious.nerdvpn.de',
+          'https://inv.tux.pizza',
+          'https://invidious.jing.rocks',
+          'https://yt.artemislena.eu',
+          'https://invidious.projectsegfau.lt',
+          'https://invidious.privacyredirect.com',
+          'https://invidious.drgns.space'
+        ];
+
+        for (const inst of invidiousInstances) {
+          resolverPromises.push((async () => {
+            const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+              signal: AbortSignal.timeout(3000)
+            });
+            if (!invRes.ok) throw new Error(`Invidious ${inst} failed`);
+            const invData = await invRes.json();
+            const audioFormats = invData.adaptiveFormats?.filter((f: any) => f.url && f.mimeType?.startsWith('audio/')) || [];
+            if (audioFormats.length === 0) throw new Error('No audio format');
+            audioFormats.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
+            return { url: audioFormats[0].url, mimeType: audioFormats[0].mimeType || 'audio/webm' };
+          })());
+        }
+
+        // 2. Cobalt API in parallel
+        resolverPromises.push((async () => {
           const cobaltRes = await fetch('https://api.cobalt.tools/api/json', {
             method: 'POST',
             headers: {
@@ -741,14 +769,36 @@ async function startServer() {
               isAudioOnly: true,
               audioFormat: 'mp3'
             }),
-            signal: AbortSignal.timeout(4000)
+            signal: AbortSignal.timeout(3000)
           });
-          if (cobaltRes.ok) {
-            const cobData = await cobaltRes.json();
-            if (cobData.url) {
-              audioStreamUrl = cobData.url;
-              contentType = 'audio/mpeg';
-            }
+          if (!cobaltRes.ok) throw new Error('Cobalt failed');
+          const cobData = await cobaltRes.json();
+          if (!cobData.url) throw new Error('Cobalt no URL');
+          return { url: cobData.url, mimeType: 'audio/mpeg' };
+        })());
+
+        // 3. Piped API in parallel
+        resolverPromises.push((async () => {
+          const pipedRes = await fetch(`https://pipedapi.kavin.rocks/streams/${videoId}`, {
+            signal: AbortSignal.timeout(3000)
+          });
+          if (!pipedRes.ok) throw new Error('Piped failed');
+          const pipedData = await pipedRes.json();
+          const audioStream = pipedData.audioStreams?.find((s: any) => s.mimeType?.startsWith('audio/'));
+          if (!audioStream?.url) throw new Error('Piped no audio stream');
+          return { url: audioStream.url, mimeType: audioStream.mimeType || 'audio/webm' };
+        })());
+
+        try {
+          const fastest = await Promise.any(resolverPromises);
+          if (fastest && fastest.url) {
+            audioStreamUrl = fastest.url;
+            contentType = fastest.mimeType;
+            streamUrlCache.set(videoId, {
+              url: audioStreamUrl,
+              contentType,
+              expiresAt: Date.now() + 15 * 60 * 1000 // 15 minutes TTL
+            });
           }
         } catch (_) {}
       }
@@ -766,7 +816,26 @@ async function startServer() {
       }
 
       // Proxy the stream completely to avoid CORS and Mobile WebView limitations
-      const audioFetch = await fetch(audioStreamUrl, { headers });
+      let audioFetch = await fetch(audioStreamUrl, { headers });
+
+      // If cached stream expired upstream, invalidate and retry once
+      if (!audioFetch.ok && audioFetch.status !== 206) {
+        streamUrlCache.delete(videoId);
+        try {
+          const cobaltFallback = await fetch('https://api.cobalt.tools/api/json', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${videoId}`, isAudioOnly: true }),
+            signal: AbortSignal.timeout(3000)
+          });
+          if (cobaltFallback.ok) {
+            const data = await cobaltFallback.json();
+            if (data.url) {
+              audioFetch = await fetch(data.url, { headers });
+            }
+          }
+        } catch (_) {}
+      }
 
       if (!audioFetch.ok && audioFetch.status !== 206) {
         return res.status(audioFetch.status).json({ error: 'Failed to fetch audio stream source' });

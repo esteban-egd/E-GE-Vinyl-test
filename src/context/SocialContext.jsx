@@ -3,7 +3,7 @@ import { toast } from 'react-hot-toast';
 import { useAuth } from './AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import db from '../lib/db';
-import { updateUserStatus } from '../services/userBddService';
+import { updateUserStatus, getEffectiveStatus } from '../services/userBddService';
 
 const SocialContext = createContext({});
 
@@ -122,11 +122,17 @@ export const SocialProvider = ({ children }) => {
 
         if (f.status === 'accepted') {
           const friendId = uId === currentUserId ? fId : uId;
-          const friendProfile = profileMap.get(friendId) || {
+          const rawProfile = profileMap.get(friendId) || {
             id: friendId,
             full_name: 'Membre Audiophile',
             username: 'audiophile',
             avatar_url: ''
+          };
+          const liveStatus = getEffectiveStatus(rawProfile);
+          const friendProfile = {
+            ...rawProfile,
+            status: liveStatus,
+            is_online: liveStatus === 'online' || liveStatus === 'listening'
           };
           if (!activeFriendsList.some(a => (a.id || a.uid) === friendId)) {
             activeFriendsList.push(friendProfile);
@@ -210,19 +216,21 @@ export const SocialProvider = ({ children }) => {
           username: 'ami',
           avatar_url: ''
         };
+        const isText = !s.video_id || s.video_id === 'text_msg' || s.video_id === 'text' || (s.title === 'Message texte' && !s.thumbnail);
         return {
           id: s.id,
           sender: senderProfile,
           receiver: receiverProfile,
           senderId: s.sender_id,
           receiverId: rId,
-          track: {
+          track: isText ? null : {
             videoId: s.video_id || s.videoId || s.id,
             title: s.title,
             artist: s.artist,
             thumbnail: s.thumbnail,
             duration: s.duration || ''
           },
+          isTextMessage: isText,
           message: s.message || '',
           createdAt: s.created_at || new Date().toISOString()
         };
@@ -271,15 +279,65 @@ export const SocialProvider = ({ children }) => {
     const currentUserId = user?.id || user?.uid;
     if (!currentUserId) return;
 
-    // Periodic "Ping" to keep status as 'online'
+    // Initial status update to 'online'
     updateUserStatus(currentUserId, 'online');
-    const pingInterval = setInterval(() => {
-      updateUserStatus(currentUserId, 'online');
-    }, 60000); // Every minute
 
-    // Supabase Realtime listener for live friend requests and shared tracks
+    // Periodic "Ping" heartbeat to keep status as 'online' and sync friend presence
+    const pingInterval = setInterval(() => {
+      if (!document.hidden) {
+        updateUserStatus(currentUserId, 'online');
+      }
+      loadSocialData();
+    }, 35000); // Every 35 seconds
+
+    // Inactivity detection (4 minutes timeout)
+    let inactivityTimer = null;
+    const resetInactivityTimer = () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      updateUserStatus(currentUserId, 'online');
+      inactivityTimer = setTimeout(() => {
+        updateUserStatus(currentUserId, 'offline');
+      }, 4 * 60 * 1000); // 4 minutes of inactivity
+    };
+
+    const handleUserActivity = () => {
+      resetInactivityTimer();
+    };
+
+    window.addEventListener('mousemove', handleUserActivity);
+    window.addEventListener('keydown', handleUserActivity);
+    window.addEventListener('click', handleUserActivity);
+    resetInactivityTimer();
+
+    // Visibility change / tab close handlers
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        updateUserStatus(currentUserId, 'offline');
+      } else {
+        updateUserStatus(currentUserId, 'online');
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      try {
+        // Use sendBeacon or synchronous/async update if possible
+        updateUserStatus(currentUserId, 'offline');
+      } catch (_) {}
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    // Supabase Realtime listener for live friend requests, shared tracks, and profile status updates
     const channelName = `social-realtime-${currentUserId}`;
     const channel = supabase.channel(channelName)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'profiles'
+      }, () => {
+        loadSocialData();
+      })
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
@@ -432,6 +490,13 @@ export const SocialProvider = ({ children }) => {
 
     return () => {
       clearInterval(pingInterval);
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      window.removeEventListener('mousemove', handleUserActivity);
+      window.removeEventListener('keydown', handleUserActivity);
+      window.removeEventListener('click', handleUserActivity);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      updateUserStatus(currentUserId, 'offline');
       supabase.removeChannel(channel);
     };
   }, [user, loadSocialData, triggerHaptic, acceptFriendRequest]);
@@ -525,7 +590,7 @@ export const SocialProvider = ({ children }) => {
     }
   };
 
-  // Decline Friend Request in DB
+  // Decline Friend Request in DB (Incoming)
   const declineFriendRequest = async (requestId) => {
     try {
       const { error } = await supabase
@@ -540,6 +605,24 @@ export const SocialProvider = ({ children }) => {
     } catch (err) {
       console.error("Erreur refus demande:", err);
       toast.error("Erreur lors du refus.");
+    }
+  };
+
+  // Cancel Friend Request in DB (Outgoing / Sent)
+  const cancelFriendRequest = async (requestId) => {
+    try {
+      const { error } = await supabase
+        .from('friendships')
+        .delete()
+        .eq('id', requestId);
+
+      if (error) throw error;
+
+      await loadSocialData();
+      toast("Demande d'ami annulée", { icon: '✕' });
+    } catch (err) {
+      console.error("Erreur annulation demande:", err);
+      toast.error("Erreur lors de l'annulation de la demande.");
     }
   };
 
@@ -635,6 +718,139 @@ export const SocialProvider = ({ children }) => {
     }
   };
 
+  // Send text-only message to friend
+  const sendMessageToFriend = async (friendId, text) => {
+    if (!user) {
+      toast.error('Veuillez vous connecter pour envoyer un message.');
+      return;
+    }
+    if (!text || !text.trim()) return;
+
+    const currentUserId = user.id;
+    const targetUserId = friendId;
+
+    if (!currentUserId || !targetUserId) {
+      toast.error("Erreur : Impossible d'identifier l'expéditeur ou le destinataire.");
+      return;
+    }
+
+    try {
+      const cleanPayload = {
+        sender_id: currentUserId,
+        receiver_id: targetUserId,
+        video_id: 'text_msg',
+        title: 'Message texte',
+        artist: '',
+        thumbnail: '',
+        message: text.trim()
+      };
+
+      const { error } = await supabase
+        .from('shared_tracks')
+        .insert([cleanPayload]);
+
+      if (error) throw error;
+
+      loadSocialData();
+    } catch (err) {
+      console.error("Erreur envoi message:", err.message || err);
+      toast.error("Erreur lors de l'envoi du message.");
+    }
+  };
+
+  // Read / Unread Status for Received Shared Tracks
+  const [readShareIds, setReadShareIds] = useState(() => {
+    try {
+      const stored = localStorage.getItem(`ege_read_shares_${user?.id || 'guest'}`);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Sync readShareIds when user changes
+  useEffect(() => {
+    if (!user) return;
+    const uid = user.id || user.uid;
+    try {
+      const stored = localStorage.getItem(`ege_read_shares_${uid}`);
+      if (stored) {
+        setReadShareIds(JSON.parse(stored));
+      } else {
+        setReadShareIds([]);
+      }
+    } catch (_) {}
+  }, [user]);
+
+  // Mark a single shared track as read
+  const markShareAsRead = useCallback((shareId) => {
+    if (!shareId) return;
+    const strId = String(shareId);
+    setReadShareIds(prev => {
+      if (prev.includes(strId)) return prev;
+      const updated = [...prev, strId];
+      try {
+        const uid = user?.id || user?.uid || 'guest';
+        localStorage.setItem(`ege_read_shares_${uid}`, JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
+  }, [user]);
+
+  // Mark all shares from a specific friend as read
+  const markConversationAsRead = useCallback((friendId) => {
+    if (!friendId || !user) return;
+    const currentUserId = user.id || user.uid;
+    const receivedFromFriend = sharedTracks
+      .filter(s => s.senderId === friendId && s.receiverId === currentUserId)
+      .map(s => String(s.id));
+
+    if (receivedFromFriend.length === 0) return;
+
+    setReadShareIds(prev => {
+      const set = new Set([...prev, ...receivedFromFriend]);
+      const updated = Array.from(set);
+      try {
+        localStorage.setItem(`ege_read_shares_${currentUserId}`, JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
+  }, [user, sharedTracks]);
+
+  // Mark all received shares as read
+  const markAllReceivedAsRead = useCallback(() => {
+    if (!user) return;
+    const currentUserId = user.id || user.uid;
+    const allReceived = sharedTracks
+      .filter(s => s.receiverId === currentUserId)
+      .map(s => String(s.id));
+
+    setReadShareIds(prev => {
+      const set = new Set([...prev, ...allReceived]);
+      const updated = Array.from(set);
+      try {
+        localStorage.setItem(`ege_read_shares_${currentUserId}`, JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
+  }, [user, sharedTracks]);
+
+  // Check if a share is read
+  const isShareRead = useCallback((shareId) => {
+    return readShareIds.includes(String(shareId));
+  }, [readShareIds]);
+
+  // Get unread count for a specific friend
+  const getUnreadCountForFriend = useCallback((friendId) => {
+    if (!user || !friendId) return 0;
+    const currentUserId = user.id || user.uid;
+    return sharedTracks.filter(s => 
+      s.senderId === friendId && 
+      s.receiverId === currentUserId && 
+      !readShareIds.includes(String(s.id))
+    ).length;
+  }, [user, sharedTracks, readShareIds]);
+
   // Modal helpers
   const openShareModal = (track) => {
     setShareModalState({ isOpen: true, track });
@@ -644,25 +860,36 @@ export const SocialProvider = ({ children }) => {
     setShareModalState({ isOpen: false, track: null });
   };
 
+  const currentUserId = user?.id || user?.uid;
   const incomingRequestsCount = pendingRequests.filter(r => r.type === 'incoming').length;
-  const receivedTracksCount = sharedTracks.length;
-  const totalUnreadCount = incomingRequestsCount;
+  const receivedTracksCount = sharedTracks.filter(s => s.receiverId === currentUserId).length;
+  const unreadReceivedTracksCount = sharedTracks.filter(s => s.receiverId === currentUserId && !readShareIds.includes(String(s.id))).length;
+  const totalUnreadCount = incomingRequestsCount + unreadReceivedTracksCount;
 
   const value = {
     friends,
     pendingRequests,
     incomingRequestsCount,
     receivedTracksCount,
+    unreadReceivedTracksCount,
     totalUnreadCount,
     privacySettings,
     sharedTracks,
+    readShareIds,
+    isShareRead,
+    markShareAsRead,
+    markConversationAsRead,
+    markAllReceivedAsRead,
+    getUnreadCountForFriend,
     searchUsers,
     sendFriendRequest,
     acceptFriendRequest,
     declineFriendRequest,
+    cancelFriendRequest,
     removeFriend,
     updatePrivacySettings,
     shareTrackWithFriend,
+    sendMessageToFriend,
     shareModalState,
     openShareModal,
     closeShareModal,

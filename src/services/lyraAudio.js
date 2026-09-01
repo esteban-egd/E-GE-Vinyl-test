@@ -5,6 +5,7 @@
 
 
 import { parseDurationToSeconds, getRealisticDuration } from '../utils/formatDuration';
+import { scoreAudioTrack } from './musicDataService';
 
 /**
  * Extrait systématiquement l'ID YouTube valide de 11 caractères
@@ -245,40 +246,42 @@ export const searchYouTubeMusic = searchLyraMusic;
 export async function getLyraAudioStream(videoId, title, artist, targetDuration = 0) {
   let resolvedYtId = extractYouTubeId(videoId);
 
-  // Si videoId n'est pas un ID YouTube de 11 caractères, rechercher à la demande avec filtrage strict par durée (+/- 3s max)
+  // Si videoId n'est pas un ID YouTube direct de 11 caractères, rechercher la version studio officielle authentique
   if (!resolvedYtId || resolvedYtId.length !== 11) {
     if (title || artist) {
       try {
-        const query = `${title || ''} ${artist || ''}`.trim();
+        const cleanTitle = (title || '').trim();
+        const cleanArtist = (artist || '').trim();
+        const query = `${cleanTitle} ${cleanArtist}`.trim();
+        
         const searchResults = await searchLyraMusic(query);
         if (searchResults && searchResults.length > 0) {
           let best = null;
-          let bestDiff = 999;
+          let bestScore = -999999;
 
           for (const cand of searchResults) {
             const candDur = typeof cand.duration === 'number' ? cand.duration : parseDurationToSeconds(cand.duration);
             const diff = targetDuration > 0 && candDur > 0 ? Math.abs(candDur - targetDuration) : 0;
             
-            // Priorité absolue : candidats dans la tolérance +/- 3s max
-            if (targetDuration > 0 && candDur > 0 && diff <= 3) {
-              if (diff < bestDiff) {
-                bestDiff = diff;
-                best = cand;
+            // Calcul du score de correspondance de la piste audio officielle
+            let candidateScore = scoreAudioTrack(cand, cleanTitle, cleanArtist);
+
+            // Bonus pour concordance stricte de la durée du master studio (+/- 3s)
+            if (targetDuration > 0 && candDur > 0) {
+              if (diff <= 2) {
+                candidateScore += 20000;
+              } else if (diff <= 4) {
+                candidateScore += 12000;
+              } else if (diff <= 7) {
+                candidateScore += 5000;
+              } else if (diff > 15) {
+                candidateScore -= 15000; // Probablement clip avec sketch/intro ou version longue
               }
             }
-          }
 
-          // Fallback à +/- 6s si rien trouvé à +/- 3s
-          if (!best && targetDuration > 0) {
-            for (const cand of searchResults) {
-              const candDur = typeof cand.duration === 'number' ? cand.duration : parseDurationToSeconds(cand.duration);
-              const diff = Math.abs(candDur - targetDuration);
-              if (candDur > 0 && diff <= 6) {
-                if (diff < bestDiff) {
-                  bestDiff = diff;
-                  best = cand;
-                }
-              }
+            if (candidateScore > bestScore) {
+              bestScore = candidateScore;
+              best = cand;
             }
           }
 
@@ -305,7 +308,9 @@ export async function getLyraAudioStream(videoId, title, artist, targetDuration 
     }
   }
 
-  // 1. First, try several Invidious instances to fetch the audio stream direct URL
+  // 1. Race direct external stream sources in parallel with short timeouts
+  const streamPromises = [];
+
   const instances = [
     'https://invidious.nerdvpn.de',
     'https://inv.tux.pizza',
@@ -317,23 +322,21 @@ export async function getLyraAudioStream(videoId, title, artist, targetDuration 
   ];
 
   for (const inst of instances) {
-    try {
+    streamPromises.push((async () => {
       const res = await fetch(`${inst}/api/v1/videos/${resolvedYtId}`, {
-        signal: AbortSignal.timeout(4000)
+        signal: AbortSignal.timeout(2500)
       });
-      if (res.ok) {
-        const data = await res.json();
-        const audioFormats = data.adaptiveFormats?.filter(f => f.url && f.mimeType?.startsWith('audio/')) || [];
-        if (audioFormats.length > 0) {
-          audioFormats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-          return audioFormats[0].url;
-        }
-      }
-    } catch (_) {}
+      if (!res.ok) throw new Error('Invidious failed');
+      const data = await res.json();
+      const audioFormats = data.adaptiveFormats?.filter(f => f.url && f.mimeType?.startsWith('audio/')) || [];
+      if (audioFormats.length === 0) throw new Error('No audio format');
+      audioFormats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+      return audioFormats[0].url;
+    })());
   }
 
-  // 2. Fallback to Cobalt API (highly reliable direct video/audio resolver)
-  try {
+  // 2. Cobalt API in parallel
+  streamPromises.push((async () => {
     const res = await fetch('https://api.cobalt.tools/api/json', {
       method: 'POST',
       headers: {
@@ -346,26 +349,31 @@ export async function getLyraAudioStream(videoId, title, artist, targetDuration 
         audioFormat: 'mp3',
         audioQuality: '8' // 320kbps
       }),
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(2500)
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.url) return data.url;
-    }
-  } catch (_) {}
+    if (!res.ok) throw new Error('Cobalt failed');
+    const data = await res.json();
+    if (data.url) return data.url;
+    throw new Error('Cobalt no URL');
+  })());
 
-  // 3. Fallback to Piped API
-  try {
+  // 3. Piped API in parallel
+  streamPromises.push((async () => {
     const res = await fetch(`https://pipedapi.kavin.rocks/streams/${resolvedYtId}`, {
-      signal: AbortSignal.timeout(4000)
+      signal: AbortSignal.timeout(2500)
     });
-    if (res.ok) {
-      const data = await res.json();
-      const audioStream = data.audioStreams?.find(s => s.mimeType?.startsWith('audio/'));
-      if (audioStream?.url) return audioStream.url;
-    }
+    if (!res.ok) throw new Error('Piped failed');
+    const data = await res.json();
+    const audioStream = data.audioStreams?.find(s => s.mimeType?.startsWith('audio/'));
+    if (audioStream?.url) return audioStream.url;
+    throw new Error('Piped no audio stream');
+  })());
+
+  try {
+    const directUrl = await raceToSuccess(streamPromises);
+    if (directUrl) return directUrl;
   } catch (_) {}
 
-  // 4. Default to standard public search stream format endpoint or fallback to Vercel api stream endpoint
+  // 4. Default to high-performance Server Stream Proxy (/api/stream?id=...)
   return `/api/stream?id=${resolvedYtId}`;
 }

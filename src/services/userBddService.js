@@ -54,9 +54,13 @@ export async function updateUserStatus(userId, status, currentTrack = null) {
   if (!userId) return;
   
   try {
+    const isOnline = status === 'online' || status === 'listening';
+    const nowIso = new Date().toISOString();
     const payload = {
       status: status || 'online',
-      updated_at: new Date().toISOString()
+      is_online: isOnline,
+      last_seen: nowIso,
+      updated_at: nowIso
     };
     
     if (currentTrack !== undefined) {
@@ -71,6 +75,129 @@ export async function updateUserStatus(userId, status, currentTrack = null) {
     // Silently fail if column doesn't exist yet
     console.warn('[userBddService] Failed to update profile status:', err.message);
   }
+}
+
+/**
+ * Increment total cumulative listening time in seconds for a user
+ */
+export async function incrementListeningTime(userId, secondsToAdd = 5) {
+  if (!userId || secondsToAdd <= 0) return 0;
+  
+  let updatedTotal = 0;
+
+  // 1. Update local Dexie first for instant zero-latency UI
+  try {
+    if (db?.profiles) {
+      const existing = await db.profiles.get(userId);
+      const currentSec = Number(existing?.total_listening_seconds || 0);
+      updatedTotal = currentSec + secondsToAdd;
+      await db.profiles.put({
+        ...(existing || {}),
+        id: userId,
+        total_listening_seconds: updatedTotal,
+        updated_at: new Date().toISOString()
+      });
+    }
+  } catch (e) {
+    console.warn('[userBddService] Local listening time update error:', e);
+  }
+
+  // Notify UI live of the updated listening seconds
+  if (typeof window !== 'undefined' && updatedTotal > 0) {
+    window.dispatchEvent(new CustomEvent('lyra:listening_time_updated', {
+      detail: { userId, totalSeconds: updatedTotal }
+    }));
+  }
+
+  // 2. Update Supabase BDD (RPC if exists, otherwise fallback to select + update)
+  try {
+    const { data: rpcData, error: rpcError } = await supabase.rpc('increment_listening_time', {
+      p_user_id: userId,
+      p_seconds_to_add: secondsToAdd
+    });
+
+    if (!rpcError && typeof rpcData === 'number') {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lyra:listening_time_updated', {
+          detail: { userId, totalSeconds: rpcData }
+        }));
+      }
+      return rpcData;
+    }
+
+    // Direct update fallback
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('total_listening_seconds')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const currentBddSec = Number(prof?.total_listening_seconds || (updatedTotal > 0 ? updatedTotal - secondsToAdd : 0));
+    const newTotal = currentBddSec + secondsToAdd;
+
+    await supabase
+      .from('profiles')
+      .update({
+        total_listening_seconds: newTotal,
+        last_seen: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('lyra:listening_time_updated', {
+        detail: { userId, totalSeconds: newTotal }
+      }));
+    }
+
+    return newTotal;
+  } catch (err) {
+    console.warn('[userBddService] Supabase increment listening time error:', err);
+  }
+
+  return updatedTotal;
+}
+
+/**
+ * Format listening seconds into a detailed, human-readable string
+ */
+export function formatListeningTime(totalSeconds) {
+  const sec = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  if (sec === 0) return '0 min';
+  
+  const hours = Math.floor(sec / 3600);
+  const minutes = Math.floor((sec % 3600) / 60);
+  const seconds = sec % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}min` : `${hours}h`;
+  }
+  if (minutes > 0) {
+    return seconds > 0 && minutes < 5 ? `${minutes}min ${seconds}s` : `${minutes} min`;
+  }
+  return `${seconds}s`;
+}
+
+/**
+ * Calculates effective live user status based on status flags and heartbeat recency
+ */
+export function getEffectiveStatus(profile) {
+  if (!profile) return 'offline';
+  const rawStatus = profile.status || (profile.is_online ? 'online' : 'offline');
+  if (rawStatus === 'offline' || rawStatus === 'none' || profile.is_online === false) {
+    return 'offline';
+  }
+
+  // Check last_seen / updated_at heartbeat recency (tolerance: 2 minutes)
+  const lastActive = profile.last_seen || profile.updated_at;
+  if (lastActive) {
+    const elapsed = Date.now() - new Date(lastActive).getTime();
+    if (elapsed > 2 * 60 * 1000) {
+      return 'offline';
+    }
+  }
+
+  return rawStatus === 'listening' ? 'listening' : 'online';
 }
 
 /**

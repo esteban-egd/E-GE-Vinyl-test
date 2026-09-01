@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import db from '../lib/db';
 import { useAuth } from '../context/AuthContext';
-import { recordListeningHistory, saveUserQueue, fetchUserQueue } from '../services/userBddService';
+import { recordListeningHistory, saveUserQueue, fetchUserQueue, incrementListeningTime } from '../services/userBddService';
 import { getTrackAudioUrl, getCachedImageUrl } from '../services/offlineStorageService';
 import { getHdArtwork, getMainArtistName, isLiveTrack, isClipTrack, scoreAudioTrack } from '../services/musicDataService';
 import { searchLyraMusic, extractYouTubeId } from '../services/lyraAudio';
@@ -503,17 +503,77 @@ export function useAudioPlayer() {
         handleTrackEndedRef.current?.();
       }
     };
-    const onError = () => {
+    const onError = async () => {
       if (activeEngineRef.current === 'audio') {
-        console.warn('[AudioEngine] Erreur audio HTML5, essai YouTube Iframe fallback...');
-        if (currentTrack?.videoId && iframePlayerRef.current) {
-          activeEngineRef.current = 'iframe';
-          if (typeof iframePlayerRef.current.seekTo === 'function') iframePlayerRef.current.seekTo(0, true);
-          iframePlayerRef.current.loadVideoById(currentTrack.videoId, 0);
-        } else {
-          setIsPlaying(false);
-          setIsLoading(false);
+        console.warn('[AudioEngine] Erreur audio HTML5, tentative de récupération automatique...');
+        const track = currentTrack;
+        const validId = extractYouTubeId(track?.videoId || track?.ytVideoId || track?.id);
+        
+        if (validId && validId.length === 11) {
+          // 1. Try high-performance server stream proxy
+          if (audioRef.current && !audioRef.current.src.includes(`/api/stream?id=${validId}`)) {
+            try {
+              audioRef.current.src = `/api/stream?id=${validId}`;
+              audioRef.current.volume = volume;
+              await audioRef.current.play();
+              setIsPlaying(true);
+              setIsLoading(false);
+              setError(null);
+              return;
+            } catch (_) {}
+          }
+          
+          // 2. Try YouTube iframe player
+          if (iframePlayerRef.current && typeof iframePlayerRef.current.loadVideoById === 'function') {
+            activeEngineRef.current = 'iframe';
+            try {
+              if (typeof iframePlayerRef.current.unMute === 'function') iframePlayerRef.current.unMute();
+              if (typeof iframePlayerRef.current.setVolume === 'function') iframePlayerRef.current.setVolume(Math.round(volume * 100));
+              iframePlayerRef.current.loadVideoById(validId, 0);
+              if (typeof iframePlayerRef.current.playVideo === 'function') iframePlayerRef.current.playVideo();
+              setIsPlaying(true);
+              setIsLoading(false);
+              setError(null);
+              return;
+            } catch (err) {
+              console.warn('[AudioEngine] Iframe recovery error:', err);
+            }
+          }
+        } else if (track && (track.title || track.artist)) {
+          // 3. Dynamic search resolution fallback
+          try {
+            const query = `${track.title || ''} ${track.artist || ''}`.trim();
+            const results = await searchLyraMusic(query);
+            if (results && results.length > 0) {
+              const foundId = extractYouTubeId(results[0].videoId || results[0].id);
+              if (foundId && foundId.length === 11) {
+                if (audioRef.current) {
+                  audioRef.current.src = `/api/stream?id=${foundId}`;
+                  audioRef.current.volume = volume;
+                  try {
+                    await audioRef.current.play();
+                    setIsPlaying(true);
+                    setIsLoading(false);
+                    setError(null);
+                    return;
+                  } catch (_) {}
+                }
+                if (iframePlayerRef.current && typeof iframePlayerRef.current.loadVideoById === 'function') {
+                  activeEngineRef.current = 'iframe';
+                  iframePlayerRef.current.loadVideoById(foundId, 0);
+                  if (typeof iframePlayerRef.current.playVideo === 'function') iframePlayerRef.current.playVideo();
+                  setIsPlaying(true);
+                  setIsLoading(false);
+                  setError(null);
+                  return;
+                }
+              }
+            }
+          } catch (_) {}
         }
+
+        setIsPlaying(false);
+        setIsLoading(false);
       }
     };
 
@@ -912,6 +972,24 @@ export function useAudioPlayer() {
       } catch (_) {}
     }
 
+    // INSTANT SYNCHRONOUS PLAYBACK START (Fixes first-tap issue on iOS/Safari and mobile)
+    if (validYtId && audioRef.current) {
+      try {
+        activeEngineRef.current = 'audio';
+        audioRef.current.src = `/api/stream?id=${validYtId}`;
+        audioRef.current.volume = volume;
+        audioRef.current.play().then(() => {
+          setIsPlaying(true);
+          setIsLoading(false);
+          setError(null);
+        }).catch((err) => {
+          console.warn('[AudioEngine] Instant play deferred/rejected:', err);
+        });
+      } catch (e) {
+        console.warn('[AudioEngine] Instant play exception:', e);
+      }
+    }
+
     // Check offline / local cache first (with pre-buffered instant swap & Cache API)
     (async () => {
       try {
@@ -1039,21 +1117,7 @@ export function useAudioPlayer() {
         if (currentRequestId !== playRequestIdRef.current) return;
 
         if (streamUrl && audioRef.current) {
-          let finalUrl = streamUrl;
-
-          // On iOS, fetching as Blob and using createObjectURL creates a "local priority" stream
-          if (isMobileDevice() && !streamUrl.startsWith('blob:') && !streamUrl.startsWith('data:')) {
-            try {
-              console.log('[AudioEngine] iOS detected: Fetching track as Blob for background priority...');
-              const response = await fetch(streamUrl);
-              const blob = await response.blob();
-              finalUrl = URL.createObjectURL(blob);
-            } catch (fetchErr) {
-              console.warn('[AudioEngine] Blob fetch failed, falling back to direct URL:', fetchErr);
-            }
-          }
-
-          audioRef.current.src = finalUrl;
+          audioRef.current.src = streamUrl;
           audioRef.current.volume = volume;
           await audioRef.current.play();
           setIsPlaying(true);
@@ -1189,6 +1253,24 @@ export function useAudioPlayer() {
               setCurrentTrack({ ...trackMeta });
               updateMediaSessionMetadata(trackMeta);
 
+              // 1. Try HTML5 high fidelity stream first
+              if (audioRef.current) {
+                try {
+                  activeEngineRef.current = 'audio';
+                  audioRef.current.src = `/api/stream?id=${foundId}`;
+                  audioRef.current.volume = volume;
+                  await audioRef.current.play();
+                  setIsPlaying(true);
+                  setIsLoading(false);
+                  setError(null);
+                  return;
+                } catch (audioErr) {
+                  console.warn('[AudioEngine] HTML5 stream direct play failed on resolved ID, using iframe fallback:', audioErr);
+                }
+              }
+
+              // 2. Iframe Fallback
+              activeEngineRef.current = 'iframe';
               const currentPlayer2 = iframePlayerRef.current;
               if (currentPlayer2 && typeof currentPlayer2.loadVideoById === 'function') {
                 if (typeof currentPlayer2.unMute === 'function') currentPlayer2.unMute();
@@ -1255,6 +1337,66 @@ export function useAudioPlayer() {
       }
     })();
   }, [updateMediaSessionMetadata, volume, user]);
+
+  // Real cumulative listening time tracker (accumulates strictly while music is actively playing)
+  const lastActivePlayTimeRef = useRef(null);
+
+  useEffect(() => {
+    const userId = user?.id || user?.uid;
+    
+    // If paused, stopped, or no user
+    if (!userId || !isPlaying) {
+      if (lastActivePlayTimeRef.current && userId) {
+        const deltaSec = Math.round((Date.now() - lastActivePlayTimeRef.current) / 1000);
+        if (deltaSec >= 1 && deltaSec <= 30) {
+          incrementListeningTime(userId, deltaSec);
+        }
+        lastActivePlayTimeRef.current = null;
+      }
+      return;
+    }
+
+    // Playback is active: initialize timestamp
+    lastActivePlayTimeRef.current = Date.now();
+
+    // Accumulate actual elapsed seconds every 3 seconds
+    const interval = setInterval(() => {
+      if (!lastActivePlayTimeRef.current) {
+        lastActivePlayTimeRef.current = Date.now();
+        return;
+      }
+      const now = Date.now();
+      const deltaSec = Math.floor((now - lastActivePlayTimeRef.current) / 1000);
+      if (deltaSec >= 3 && deltaSec <= 30) {
+        incrementListeningTime(userId, deltaSec);
+        lastActivePlayTimeRef.current = now;
+      }
+    }, 3000);
+
+    const handleUnload = () => {
+      if (lastActivePlayTimeRef.current && userId && isPlaying) {
+        const deltaSec = Math.round((Date.now() - lastActivePlayTimeRef.current) / 1000);
+        if (deltaSec >= 1 && deltaSec <= 30) {
+          incrementListeningTime(userId, deltaSec);
+        }
+        lastActivePlayTimeRef.current = null;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('beforeunload', handleUnload);
+      if (lastActivePlayTimeRef.current && userId) {
+        const deltaSec = Math.round((Date.now() - lastActivePlayTimeRef.current) / 1000);
+        if (deltaSec >= 1 && deltaSec <= 30) {
+          incrementListeningTime(userId, deltaSec);
+        }
+        lastActivePlayTimeRef.current = null;
+      }
+    };
+  }, [isPlaying, user?.id, user?.uid]);
 
   // Remote play event listener (from Toast notifications)
   useEffect(() => {
@@ -1570,29 +1712,45 @@ export function useAudioPlayer() {
   const isCurrentTrack = useCallback((track) => {
     if (!currentTrack || !track) return false;
     
+    const sanitize = (v) => {
+      if (v == null) return null;
+      const s = String(v).trim();
+      if (!s || s === 'undefined' || s === 'null' || s === '[object Object]' || s === 'dz_undefined' || s === 'dz_null') return null;
+      return s;
+    };
+
     // Strict comparison by unique track ID / Deezer ID / YouTube videoId
-    const cId = currentTrack.id != null ? String(currentTrack.id) : null;
-    const tId = track.id != null ? String(track.id) : null;
-    const cDzId = currentTrack.deezerId != null ? String(currentTrack.deezerId) : null;
-    const tDzId = track.deezerId != null ? String(track.deezerId) : null;
-    const cVid = currentTrack.videoId ? String(currentTrack.videoId) : null;
-    const tVid = track.videoId ? String(track.videoId) : null;
+    const cId = sanitize(currentTrack.id);
+    const tId = sanitize(track.id);
+    const cDzId = sanitize(currentTrack.deezerId);
+    const tDzId = sanitize(track.deezerId);
+    const cVid = sanitize(currentTrack.videoId);
+    const tVid = sanitize(track.videoId);
 
     // Direct match on primary unique IDs
-    if (tId && cId && tId === cId) return true;
-    if (tDzId && cDzId && tDzId === cDzId) return true;
-    if (tVid && cVid && tVid === cVid) return true;
+    let matched = false;
+    if (tId && cId && tId === cId) matched = true;
+    else if (tDzId && cDzId && tDzId === cDzId) matched = true;
+    else if (tVid && cVid && tVid === cVid) matched = true;
+    else if (tId && cVid && tId === cVid) matched = true;
+    else if (tVid && cId && tVid === cId) matched = true;
+    else if (tId && cDzId && (tId === cDzId || tId === `dz_${cDzId}`)) matched = true;
+    else if (cId && tDzId && (cId === tDzId || cId === `dz_${tDzId}`)) matched = true;
+    else if (tVid && cDzId && (tVid === cDzId || tVid === `dz_${cDzId}`)) matched = true;
+    else if (cVid && tDzId && (cVid === tDzId || cVid === `dz_${tDzId}`)) matched = true;
 
-    // Cross-check id with videoId / deezerId (e.g., '123' vs 'dz_123')
-    if (tId && cVid && tId === cVid) return true;
-    if (tVid && cId && tVid === cId) return true;
-    if (tId && cDzId && (tId === cDzId || tId === `dz_${cDzId}`)) return true;
-    if (cId && tDzId && (cId === tDzId || cId === `dz_${tDzId}`)) return true;
-    if (tVid && cDzId && (tVid === cDzId || tVid === `dz_${cDzId}`)) return true;
-    if (cVid && tDzId && (cVid === tDzId || cVid === `dz_${tDzId}`)) return true;
+    if (!matched) return false;
 
-    // STRICT: Do NOT check by title or artist alone (to prevent false matches across remixes, live, acoustic versions)
-    return false;
+    // Safety guard against false ID collisions across different artists
+    if (track.artist && currentTrack.artist) {
+      const art1 = String(track.artist).trim().toLowerCase();
+      const art2 = String(currentTrack.artist).trim().toLowerCase();
+      if (art1 && art2 && art1 !== art2 && !art1.includes(art2) && !art2.includes(art1)) {
+        return false;
+      }
+    }
+
+    return true;
   }, [currentTrack]);
 
   const toggleShuffle = useCallback(() => {

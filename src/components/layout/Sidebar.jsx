@@ -34,16 +34,12 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
 
   const isGuest = !user || user.is_guest;
   
-  const rawDisplayName = profile?.full_name?.trim() || profile?.username?.trim();
-  const rawUsername = profile?.username?.trim();
+  const rawDisplayName = profile?.full_name?.trim() || user?.user_metadata?.full_name?.trim();
+  const rawUsername = profile?.username?.trim() || user?.user_metadata?.username?.trim() || (user?.email ? user.email.split('@')[0] : 'membre');
   
-  // Rule: Use profile.full_name / profile.username, never split email if profile exists
-  const userTitle = profile 
-    ? (rawDisplayName || rawUsername || 'Membre E-GE') 
-    : (user?.email ? user.email.split('@')[0] : 'Utilisateur');
-  
+  const userTitle = rawDisplayName || rawUsername || (user?.email ? user.email.split('@')[0] : 'Membre E-GE');
   const displayName = isGuest ? 'Invitations E-GE' : userTitle;
-  const usernameSubtext = isGuest ? 'Mode Invité' : (rawUsername && rawUsername !== userTitle ? `@${rawUsername.replace('@', '')}` : null);
+  const usernameSubtext = isGuest ? 'Mode Invité' : `@${rawUsername.replace('@', '')}`;
   const avatarUrl = isGuest ? '' : profile?.avatar_url;
 
   const handleProfileClick = (e) => {
@@ -163,7 +159,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
             {usernameSubtext && (
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span 
-                  className="text-[9.5px] font-semibold tracking-wide truncate max-w-[130px] text-red-400/90"
+                  className="text-[9.5px] font-medium font-mono text-neutral-400 tracking-wide truncate max-w-[130px]"
                 >
                   {usernameSubtext}
                 </span>

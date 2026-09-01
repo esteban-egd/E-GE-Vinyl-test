@@ -77,6 +77,7 @@ export async function searchOfficialDeezerArtist(artistQuery) {
   if (!artistQuery || !artistQuery.trim()) return null;
   const qClean = artistQuery.trim();
   const qNorm = normalizeStr(qClean);
+  const qWords = qNorm.split(/\s+/).filter(Boolean);
 
   try {
     // 1. Recherche d'artistes sur Deezer via JSONP
@@ -95,26 +96,44 @@ export async function searchOfficialDeezerArtist(artistQuery) {
     if (data && Array.isArray(data.data) && data.data.length > 0) {
       const candidates = data.data;
 
-      // Scoring des candidats pour éliminer immédiatement les homonymes obscurs
-      // (ex: Téléphone français 580k fans vs indonésien 141 fans)
+      // Scoring intelligent des candidats :
+      // 1. Match exact du nom ("James Loup" vs "James Blunt") -> Priorité absolue
+      // 2. Inclusion de tous les mots clés de la recherche
+      // 3. Arbitrage par nombre de fans SEULEMENT entre vrais matches
       for (const art of candidates) {
         const artNorm = normalizeStr(art.name || '');
+        const artWords = artNorm.split(/\s+/).filter(Boolean);
         const fans = art.nb_fan || 0;
 
-        let matchMultiplier = 0.5;
+        let baseScore = 0;
+
         if (artNorm === qNorm) {
-          matchMultiplier = 5.0; // Match exact
+          // Exact match (ex: "James Loup" == "james loup")
+          baseScore = 100000000 + fans;
         } else if (artNorm.startsWith(qNorm) || qNorm.startsWith(artNorm)) {
-          matchMultiplier = 2.5;
-        } else if (artNorm.includes(qNorm) || qNorm.includes(artNorm)) {
-          matchMultiplier = 1.2;
+          // Préfixe direct (ex: "Lynyrd Skynyrd" vs "The Lynyrd Skynyrd")
+          baseScore = 50000000 + fans;
+        } else if (qWords.length > 0 && qWords.every(w => artNorm.includes(w))) {
+          // Tous les mots de la requête sont présents dans le nom de l'artiste
+          baseScore = 25000000 + fans;
+        } else {
+          // Vérifier combien de mots correspondent
+          const matchedWords = qWords.filter(w => artNorm.includes(w)).length;
+          if (matchedWords === 0) {
+            // Aucun mot clé ne correspond -> candidat éliminé
+            baseScore = 0;
+          } else {
+            // Correspondance partielle (ex: "James Blunt" pour "James Loup" : seul "James" matche)
+            // On le pénalise lourdement pour ne jamais écraser un artiste qui matche la requête
+            baseScore = (Math.max(fans, 10) * 0.001) + (matchedWords * 500);
+          }
         }
 
-        art._score = (Math.max(fans, 100) * matchMultiplier);
+        art._score = baseScore;
       }
 
       candidates.sort((a, b) => (b._score || 0) - (a._score || 0));
-      return candidates[0];
+      return candidates[0]._score > 0 ? candidates[0] : candidates[0];
     }
   } catch (err) {
     console.warn('[artistService] searchOfficialDeezerArtist error:', err);

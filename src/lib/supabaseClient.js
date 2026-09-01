@@ -64,7 +64,11 @@ if (!supabaseInstance) {
             const existingProfile = await db.profiles.get(profileId).catch(() => null);
             const profileToSave = {
               ...(existingProfile || {}),
+              ...item,
               id: profileId,
+              status: item.status !== undefined ? item.status : (existingProfile?.status || 'online'),
+              current_track: item.current_track !== undefined ? item.current_track : (existingProfile?.current_track || null),
+              last_seen: item.last_seen || item.updated_at || new Date().toISOString(),
               full_name: item.full_name !== undefined ? item.full_name : (existingProfile?.full_name || item.displayName || 'Mélomane E-GE'),
               username: item.username !== undefined ? item.username : (existingProfile?.username || 'user'),
               email: item.email !== undefined ? item.email : (existingProfile?.email || ''),
@@ -647,41 +651,147 @@ if (!supabaseInstance) {
     return builder;
   };
 
+  const authListeners = new Set();
+  const getStoredSession = () => {
+    try {
+      const raw = localStorage.getItem('ege_auth_session');
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
+    return null;
+  };
+
+  const setStoredSession = (session) => {
+    try {
+      if (session) {
+        localStorage.setItem('ege_auth_session', JSON.stringify(session));
+      } else {
+        localStorage.removeItem('ege_auth_session');
+      }
+    } catch (_) {}
+  };
+
   supabaseInstance = {
     auth: {
       async getSession() {
-        return { data: { session: null }, error: null };
+        const session = getStoredSession();
+        return { data: { session }, error: null };
       },
       onAuthStateChange(callback) {
-        // Simple mock subscription
+        authListeners.add(callback);
+        const currentSession = getStoredSession();
         setTimeout(() => {
-          callback('INITIAL_SESSION', null);
+          callback('INITIAL_SESSION', currentSession);
         }, 0);
-        return { data: { subscription: { unsubscribe() {} } } };
+        return {
+          data: {
+            subscription: {
+              unsubscribe() {
+                authListeners.delete(callback);
+              }
+            }
+          }
+        };
       },
       async signInWithPassword({ email }) {
-        const user = {
-          id: 'mock-user-' + email.replace(/[^a-zA-Z0-9]/g, ''),
-          email: email,
-          is_mock: true
+        const cleanEmail = (typeof email === 'string' && email.trim()) ? email.trim() : 'user@ege.fr';
+        const userId = 'user-' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+        const username = cleanEmail.split('@')[0];
+        
+        // Ensure profile exists in Dexie
+        const existingProfile = await db.profiles.get(userId).catch(() => null);
+        const userProfile = {
+          id: userId,
+          email: cleanEmail,
+          username: existingProfile?.username || username,
+          full_name: existingProfile?.full_name || username,
+          avatar_url: existingProfile?.avatar_url || '',
+          privacy_likes: existingProfile?.privacy_likes || 'friends',
+          privacy_playlists: existingProfile?.privacy_playlists || 'friends',
+          privacy_artists: existingProfile?.privacy_artists || 'friends',
+          updated_at: new Date().toISOString()
         };
+        await db.profiles.put(userProfile).catch(() => {});
+
+        const user = {
+          id: userId,
+          email: cleanEmail,
+          user_metadata: {
+            full_name: userProfile.full_name,
+            username: userProfile.username,
+            avatar_url: userProfile.avatar_url
+          },
+          is_guest: false
+        };
+
+        const session = {
+          access_token: 'mock-token-' + Date.now(),
+          user,
+          expires_at: Date.now() + 30 * 24 * 3600 * 1000
+        };
+
+        setStoredSession(session);
+        authListeners.forEach(cb => {
+          try { cb('SIGNED_IN', session); } catch (_) {}
+        });
+
         return {
-          data: { user, session: { user } },
+          data: { user, session },
           error: null
         };
       },
-      async signUp({ email }) {
-        const user = {
-          id: 'mock-user-' + email.replace(/[^a-zA-Z0-9]/g, ''),
-          email: email,
-          is_mock: true
+      async signUp({ email, options }) {
+        const cleanEmail = (typeof email === 'string' && email.trim()) ? email.trim() : 'user@ege.fr';
+        const userId = 'user-' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+        const meta = options?.data || {};
+        const username = meta.username || cleanEmail.split('@')[0];
+        const fullName = meta.full_name || username;
+        const avatarUrl = meta.avatar_url || '';
+
+        const userProfile = {
+          id: userId,
+          email: cleanEmail,
+          username,
+          full_name: fullName,
+          avatar_url: avatarUrl,
+          privacy_likes: 'friends',
+          privacy_playlists: 'friends',
+          privacy_artists: 'friends',
+          updated_at: new Date().toISOString()
         };
+        await db.profiles.put(userProfile).catch(() => {});
+
+        const user = {
+          id: userId,
+          email: cleanEmail,
+          user_metadata: {
+            full_name: fullName,
+            username,
+            avatar_url: avatarUrl
+          },
+          is_guest: false
+        };
+
+        const session = {
+          access_token: 'mock-token-' + Date.now(),
+          user,
+          expires_at: Date.now() + 30 * 24 * 3600 * 1000
+        };
+
+        setStoredSession(session);
+        authListeners.forEach(cb => {
+          try { cb('SIGNED_IN', session); } catch (_) {}
+        });
+
         return {
-          data: { user, session: { user } },
+          data: { user, session },
           error: null
         };
       },
       async signOut() {
+        setStoredSession(null);
+        authListeners.forEach(cb => {
+          try { cb('SIGNED_OUT', null); } catch (_) {}
+        });
         return { error: null };
       }
     },
