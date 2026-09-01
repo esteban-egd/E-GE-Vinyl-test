@@ -126,23 +126,37 @@ export async function incrementListeningTime(userId, secondsToAdd = 5) {
     }
 
     // Direct update fallback
-    const { data: prof } = await supabase
+    const { data: prof, error: selectError } = await supabase
       .from('profiles')
       .select('total_listening_seconds')
       .eq('id', userId)
       .maybeSingle();
 
+    if (selectError) {
+      if (selectError.code === 'PGRST204' || selectError.message.includes('total_listening_seconds')) {
+         if (typeof window !== 'undefined' && !window.hasWarnedSql) {
+           console.error("Veuillez exécuter le script SQL dans Supabase pour créer la colonne total_listening_seconds !");
+           window.hasWarnedSql = true;
+         }
+      }
+      return updatedTotal; // Fallback to local value if column missing
+    }
+
     const currentBddSec = Number(prof?.total_listening_seconds || (updatedTotal > 0 ? updatedTotal - secondsToAdd : 0));
     const newTotal = currentBddSec + secondsToAdd;
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('profiles')
       .update({
         total_listening_seconds: newTotal,
-        last_seen: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
       .eq('id', userId);
+      
+    if (updateError) {
+      console.error("[userBddService] Supabase fallback update error:", updateError);
+      return updatedTotal; // fallback
+    }
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('lyra:listening_time_updated', {
