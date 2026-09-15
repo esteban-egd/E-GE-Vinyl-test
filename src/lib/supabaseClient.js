@@ -183,10 +183,23 @@ if (!supabaseInstance) {
               thumbnail: item.track?.thumbnail || item.thumbnail || '',
               duration: item.track?.duration || item.duration || '',
               message: item.message || '',
+              is_liked: item.is_liked || false,
+              reply_to_id: item.reply_to_id || null,
               created_at: new Date().toISOString()
             });
-            const created = { id: newId, ...item, created_at: new Date().toISOString() };
+            const created = { id: newId, ...item, is_liked: item.is_liked || false, reply_to_id: item.reply_to_id || null, created_at: new Date().toISOString() };
             return { data: isSingle ? created : [created], error: null };
+          }
+        } else if (operation === 'update') {
+          const idFilter = filters.find(f => f.field === 'id')?.value;
+          if (idFilter && payload) {
+            const updates = {};
+            if (payload.is_liked !== undefined) updates.is_liked = payload.is_liked;
+            if (payload.message !== undefined) updates.message = payload.message;
+            if (Object.keys(updates).length > 0) {
+              await db.sharedTracks.update(Number(idFilter), updates);
+            }
+            return { data: payload, error: null };
           }
         } else if (operation === 'delete') {
           const idFilter = filters.find(f => f.field === 'id')?.value;
@@ -568,7 +581,7 @@ if (!supabaseInstance) {
 
       return { data: [], error: null };
     } catch (err) {
-      console.error(`Mock database query error on table ${table}:`, err);
+      console.error(`Mock database query error on table ${table}:`, err.stack || err);
       return { data: null, error: err };
     }
   };

@@ -43,6 +43,14 @@ db.version(5).stores({
   user_queue: 'user_id, updated_at'
 });
 
+db.version(6).stores({
+  sharedTracks: '++id, sender_id, recipient_id, videoId, title, artist, thumbnail, duration, message, created_at'
+});
+
+db.version(7).stores({
+  sharedTracks: '++id, sender_id, recipient_id, videoId, title, artist, thumbnail, duration, message, created_at'
+});
+
 // Auto-recovery for schema/version upgrade mismatches
 db.open().catch(async (err) => {
   console.error('[Dexie] Failed to open database:', err);

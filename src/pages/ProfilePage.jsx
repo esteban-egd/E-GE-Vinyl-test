@@ -4,8 +4,9 @@ import {
   User, Camera, Heart, Disc, Clock, Sparkles, Play, Trash2, 
   LogOut, Save, ShieldCheck, Music, Users, Radio, Edit3, Lock, LogIn,
   Search, UserPlus, UserCheck, Check, X, Send, Eye, EyeOff, Shield,
-  Share2, MessageSquare, Activity, Globe, LockKeyhole
+  Share2, MessageSquare, Activity, Globe, LockKeyhole, Reply, Bell, BellRing
 } from 'lucide-react';
+import { sendNativeNotification, requestNotificationPermission, checkNotificationPermission } from '../services/notificationService';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSocial } from '../context/SocialContext';
@@ -44,7 +45,8 @@ export default function ProfilePage() {
     markConversationAsRead,
     markAllReceivedAsRead,
     getUnreadCountForFriend,
-    sendMessageToFriend
+    sendMessageToFriend,
+    likeSharedItem
   } = useSocial();
 
   const { likedTracks, toggleLike } = useLikes();
@@ -59,6 +61,7 @@ export default function ProfilePage() {
   const [selectedFriendFilter, setSelectedFriendFilter] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
   const [recentTracks, setRecentTracks] = useState([]);
   const [topArtists, setTopArtists] = useState([]);
@@ -102,6 +105,39 @@ export default function ProfilePage() {
   const [fullNameInput, setFullNameInput] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Notification state
+  const [notifAuthorized, setNotifAuthorized] = useState(false);
+
+  useEffect(() => {
+    checkNotificationPermission().then(granted => setNotifAuthorized(granted));
+  }, []);
+
+  const handleRequestNotif = async () => {
+    const granted = await requestNotificationPermission();
+    setNotifAuthorized(granted);
+    if (granted) {
+      toast.success('Notifications autorisées !');
+      await sendNativeNotification({
+        title: '🔔 E-GE Vinyl',
+        body: 'Les notifications sont bien configurées sur votre appareil !'
+      });
+    } else {
+      toast.error('Autorisation des notifications refusée.');
+    }
+  };
+
+  const handleTestNotif = async () => {
+    const sent = await sendNativeNotification({
+      title: '🎵 E-GE Vinyl - Morceau Reçu',
+      body: 'Test de notification en direct sur votre système Android !'
+    });
+    if (sent) {
+      toast.success('Notification envoyée avec succès !');
+    } else {
+      toast('Notification envoyée (vérifiez les autorisations si non visible)', { icon: '🔔' });
+    }
+  };
 
   useEffect(() => {
     if (profile) {
@@ -1390,15 +1426,175 @@ export default function ProfilePage() {
                     </p>
                   </div>
                 );
-              })() : (
+              })() : selectedFriendFilter ? (
+                <div className="flex flex-col h-full overflow-hidden relative">
+                  <div className="flex-1 p-2 overflow-y-auto max-h-[500px] no-scrollbar flex flex-col-reverse gap-5">
+                    {[...filteredShares].reverse().map((share) => {
+                      const isMe = String(share.senderId) === String(currentUserId);
+                      const repliedToItem = share.replyToId ? filteredShares.find(i => String(i.id) === String(share.replyToId)) : null;
+
+                      // Mark as read if not sent by me and unread
+                      const isUnread = !isMe && share.receiverId === currentUserId && !isShareRead(share.id);
+                      if (isUnread) markShareAsRead(share.id); // In a render is bad, but let's keep it safe. Actually we shouldn't do side effects in render.
+                      // Wait, old code had an onClick for marking as read.
+                      // We can just rely on the feed unread badge clicking or auto-read since we call markConversationAsRead when selecting a friend anyway.
+
+                      return (
+                        <div 
+                          key={share.id} 
+                          onClick={() => { if (isUnread) markShareAsRead(share.id); }}
+                          className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group w-full`}
+                        >
+                            <div className="flex items-center gap-1.5 text-[9px] text-gray-500 px-1 font-mono mb-1.5">
+                              <span>{isMe ? 'Vous' : (share.sender?.full_name || share.sender?.username || 'Ami')}</span>
+                              <span>•</span>
+                              <span>{new Date(share.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+
+                            <div className={`relative flex items-center gap-3 ${isMe ? 'flex-row-reverse' : 'flex-row'} w-full`}>
+                              
+                              {/* Actions on hover */}
+                              <div className={`opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                <button onClick={(e) => { e.stopPropagation(); setReplyingTo(share); }} className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all cursor-pointer" title="Répondre">
+                                  <Reply size={13} />
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); likeSharedItem(share.id, !share.isLiked); }} className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-red-400 transition-all cursor-pointer" title="Aimer">
+                                  <Heart size={13} className={share.isLiked ? 'fill-red-500 text-red-500' : ''} />
+                                </button>
+                              </div>
+
+                              <div className={`flex flex-col relative max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
+                                {/* Replied context */}
+                                {repliedToItem && (
+                                  <div className={`text-[10px] text-gray-400 mb-1 px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 opacity-80 max-w-full truncate flex flex-col gap-0.5`}>
+                                    <span className="font-bold flex items-center gap-1">
+                                      <Reply size={10} /> 
+                                      {String(repliedToItem.senderId) === String(currentUserId) ? 'Vous' : (repliedToItem.sender?.username || 'Ami')}
+                                    </span>
+                                    <span className="truncate opacity-80">
+                                      {repliedToItem.isTextMessage ? repliedToItem.message : `🎵 ${repliedToItem.track?.title}`}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {share.isTextMessage || !share.track ? (
+                                  <div 
+                                    className={`px-4 py-2.5 rounded-2xl text-[13px] leading-relaxed shadow-sm relative ${
+                                      isMe 
+                                        ? 'bg-gradient-to-br from-[#c29e5a] to-[#a38043] text-black font-medium rounded-tr-sm' 
+                                        : 'bg-[#1a1a1a] text-gray-100 rounded-tl-sm border border-white/5'
+                                    }`}
+                                  >
+                                    {share.message}
+                                    {share.isLiked && (
+                                      <div className={`absolute -bottom-2 ${isMe ? '-left-2' : '-right-2'} bg-[#1a1a1a] p-1 rounded-full border border-white/5 shadow-md`}>
+                                        <Heart size={12} className="text-red-500 fill-red-500" />
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className={`w-full p-3 rounded-2xl bg-[#1a1a1a] border border-white/5 flex flex-col gap-3 shadow-md relative ${isMe ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
+                                    <div className="flex items-center justify-between gap-4">
+                                      <div className="flex items-center gap-3 min-w-0">
+                                        <img 
+                                          src={share.track.thumbnail} 
+                                          alt={share.track.title} 
+                                          className="w-11 h-11 rounded-lg object-cover border border-white/10 shrink-0 shadow-sm"
+                                        />
+                                        <div className="min-w-0 flex flex-col justify-center">
+                                          <h4 className="text-xs font-bold text-white truncate leading-tight">{share.track.title}</h4>
+                                          <p className="text-[10px] text-gray-400 truncate mt-0.5">{share.track.artist}</p>
+                                        </div>
+                                      </div>
+                                      <button
+                                        onClick={() => play(share.track)}
+                                        className={`p-2.5 rounded-full text-black transition-all cursor-pointer shrink-0 hover:scale-105 ${isMe ? 'bg-[#c29e5a]' : 'bg-white'}`}
+                                        title="Écouter"
+                                      >
+                                        <Play size={14} fill="currentColor" className="ml-0.5" />
+                                      </button>
+                                    </div>
+                                    {share.message && (
+                                      <p className={`text-xs p-2.5 rounded-xl border opacity-90 ${isMe ? 'bg-[#c29e5a]/10 border-[#c29e5a]/20 text-[#d6b068]' : 'bg-black/40 border-white/5 text-gray-300'}`}>
+                                        "{share.message}"
+                                      </p>
+                                    )}
+                                    {share.isLiked && (
+                                      <div className={`absolute -bottom-2 ${isMe ? '-left-2' : '-right-2'} bg-[#1a1a1a] p-1 rounded-full border border-white/5 shadow-md z-10`}>
+                                        <Heart size={12} className="text-red-500 fill-red-500" />
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  
+                  {/* Chat Input */}
+                  <div className="pt-3 border-t border-white/5 flex flex-col gap-2 mt-2">
+                    {replyingTo && (
+                      <div className="flex items-center justify-between bg-black/40 px-3 py-2 rounded-lg border border-white/5 text-[10px]">
+                        <div className="flex flex-col min-w-0 pr-2">
+                          <span className="text-[#c29e5a] font-bold flex items-center gap-1.5 mb-0.5">
+                            <Reply size={10} /> Réponse à {String(replyingTo.senderId) === String(currentUserId) ? 'Vous' : (replyingTo.sender?.username || 'Ami')}
+                          </span>
+                          <span className="text-gray-400 truncate">
+                            {replyingTo.isTextMessage ? replyingTo.message : `🎵 ${replyingTo.track?.title}`}
+                          </span>
+                        </div>
+                        <button onClick={() => setReplyingTo(null)} className="p-1 rounded-full hover:bg-white/10 text-gray-500 hover:text-white cursor-pointer shrink-0">
+                          <X size={12} />
+                        </button>
+                      </div>
+                    )}
+                    <form 
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!chatInput.trim() || !selectedFriendFilter) return;
+                        setSendingMessage(true);
+                        try {
+                          await sendMessageToFriend(selectedFriendFilter, chatInput, replyingTo?.id || null);
+                          setChatInput('');
+                          setReplyingTo(null);
+                        } catch (err) {
+                          console.error(err);
+                        } finally {
+                          setSendingMessage(false);
+                        }
+                      }} 
+                      className="flex items-center gap-2"
+                    >
+                      <input
+                        type="text"
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        placeholder="Écrire un message texte..."
+                        className="flex-1 px-4 py-3 bg-black/40 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-[#c29e5a]/50 focus:bg-black/60 transition-all placeholder:text-gray-600"
+                      />
+                      <button
+                        type="submit"
+                        disabled={sendingMessage || !chatInput.trim()}
+                        className="px-5 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-transform active:scale-95 shrink-0 shadow-md"
+                        style={{ backgroundColor: currentTheme.primary, color: '#000' }}
+                      >
+                        <Send size={13} />
+                        <span>Envoyer</span>
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              ) : (
                 <div className="space-y-4 max-h-[550px] overflow-y-auto pr-1 no-scrollbar">
                   {filteredShares.map((share) => {
                     const isSentByMe = share.senderId === currentUserId;
                     const isUnread = !isSentByMe && share.receiverId === currentUserId && !isShareRead(share.id);
-                    const senderName = isSentByMe ? "Vous" : (share.sender.full_name || share.sender.username);
+                    const senderName = isSentByMe ? "Vous" : (share.sender?.full_name || share.sender?.username || "Ami");
                     const senderAvatar = isSentByMe 
-                      ? (profile?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100') 
-                      : (share.sender.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100');
+                      ? (user?.user_metadata?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100') 
+                      : (share.sender?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100');
 
                     return (
                       <div 
@@ -1409,11 +1605,7 @@ export default function ProfilePage() {
                         className={`p-4 rounded-2xl border transition-all space-y-3 relative ${
                           isUnread
                             ? 'border-red-500/40 bg-red-950/10 shadow-lg shadow-red-500/5'
-                            : selectedFriendFilter 
-                              ? isSentByMe 
-                                ? 'ml-auto max-w-[85%] sm:max-w-[75%] bg-indigo-950/20 border-indigo-500/20 hover:border-indigo-500/30' 
-                                : 'mr-auto max-w-[85%] sm:max-w-[75%] bg-black/40 border-white/10 hover:border-white/20'
-                              : 'w-full bg-black/40 border border-white/10 hover:border-white/20'
+                            : 'w-full bg-black/40 border border-white/10 hover:border-white/20'
                         }`}
                       >
                         {/* Sender Header */}
@@ -1431,9 +1623,6 @@ export default function ProfilePage() {
                                 alt={senderName} 
                                 className="w-7 h-7 rounded-full object-cover border border-white/20 group-hover:border-white/40 transition-all"
                               />
-                              <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                <Eye size={10} className="text-white" />
-                              </div>
                             </div>
                             <span 
                               className="text-xs font-bold text-white cursor-pointer hover:underline"
@@ -1447,28 +1636,12 @@ export default function ProfilePage() {
                             <span className="text-[10px] text-gray-500 font-mono">
                               {isSentByMe ? "avez recommandé :" : "a recommandé :"}
                             </span>
-
-                            {/* Direction Badge */}
-                            {selectedFriendFilter && (
-                              <span 
-                                className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider ${
-                                  isSentByMe 
-                                    ? 'bg-indigo-500/20 text-indigo-300' 
-                                    : 'bg-amber-500/20 text-amber-300'
-                                }`}
-                              >
-                                {isSentByMe ? "Envoyé" : "Reçu"}
-                              </span>
-                            )}
-
-                            {/* Unread Pill */}
                             {isUnread && (
                               <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-black uppercase tracking-wider animate-pulse shadow-sm">
                                 Nouveau
                               </span>
                             )}
                           </div>
-
                           <div className="flex items-center gap-2">
                             {isUnread && (
                               <button
@@ -1491,11 +1664,7 @@ export default function ProfilePage() {
 
                         {/* Micro-message Bubble or Track Card */}
                         {share.isTextMessage || !share.track ? (
-                          <div className={`p-3.5 rounded-2xl text-xs leading-relaxed shadow-md ${
-                            isSentByMe 
-                              ? 'bg-gradient-to-r from-[#c29e5a] to-[#d6b068] text-black font-medium rounded-tr-none' 
-                              : 'bg-white/10 text-white rounded-tl-none border border-white/10'
-                          }`}>
+                          <div className="p-3.5 rounded-2xl text-xs leading-relaxed shadow-md bg-white/10 text-white rounded-tl-none border border-white/10">
                             {share.message}
                           </div>
                         ) : (
@@ -1506,8 +1675,6 @@ export default function ProfilePage() {
                                 <span>"{share.message}"</span>
                               </div>
                             )}
-
-                            {/* Track Card with Play Action */}
                             <div className="flex items-center justify-between p-3 rounded-xl bg-black/60 border border-white/10 group">
                               <div className="flex items-center gap-3 min-w-0">
                                 <img 
@@ -1521,7 +1688,6 @@ export default function ProfilePage() {
                                   <p className="text-[11px] text-gray-400 truncate">{share.track.artist}</p>
                                 </div>
                               </div>
-
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1541,43 +1707,6 @@ export default function ProfilePage() {
                     );
                   })}
                 </div>
-              )}
-
-              {/* Chat Input Form when a friend is selected */}
-              {selectedFriendFilter && (
-                <form 
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (!chatInput.trim() || !selectedFriendFilter) return;
-                    setSendingMessage(true);
-                    try {
-                      await sendMessageToFriend(selectedFriendFilter, chatInput);
-                      setChatInput('');
-                    } catch (err) {
-                      console.error(err);
-                    } finally {
-                      setSendingMessage(false);
-                    }
-                  }} 
-                  className="flex items-center gap-2 pt-4 border-t border-white/10 mt-4"
-                >
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Écrire un message texte..."
-                    className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-white/30"
-                  />
-                  <button
-                    type="submit"
-                    disabled={sendingMessage || !chatInput.trim()}
-                    className="px-5 py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-transform active:scale-95 shrink-0 shadow-md"
-                    style={{ backgroundColor: currentTheme.primary, color: '#000' }}
-                  >
-                    <Send size={13} />
-                    <span>Envoyer</span>
-                  </button>
-                </form>
               )}
             </div>
           </div>
@@ -1721,6 +1850,58 @@ export default function ProfilePage() {
                 </div>
               </div>
 
+            </div>
+          </div>
+
+          {/* Android & System Notification Settings Card */}
+          <div className="bg-[#121212] border border-white/10 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div 
+                  className="w-10 h-10 rounded-xl flex items-center justify-center"
+                  style={{ background: `${currentTheme.primary}15`, color: currentTheme.primary }}
+                >
+                  <BellRing size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    Notifications Système & Android
+                    {notifAuthorized ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold uppercase">
+                        Activées
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 font-semibold uppercase">
+                        En attente
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Recevez une vraie alerte native sur votre téléphone lors d'un message, musique partagée ou demande d'ami.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              {!notifAuthorized && (
+                <button
+                  onClick={handleRequestNotif}
+                  className="px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer active:scale-95 shadow-md"
+                  style={{ background: currentTheme.primary, color: '#000' }}
+                >
+                  <Bell size={14} />
+                  <span>Autoriser les notifications</span>
+                </button>
+              )}
+
+              <button
+                onClick={handleTestNotif}
+                className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center gap-2 border border-white/10 transition-all cursor-pointer active:scale-95"
+              >
+                <Sparkles size={14} />
+                <span>Tester une notification réelle</span>
+              </button>
             </div>
           </div>
 

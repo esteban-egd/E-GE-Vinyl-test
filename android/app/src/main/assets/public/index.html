@@ -8,16 +8,82 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="E GE Vinyl — Premium music streaming PWA with interactive vinyl player" />
     <title>E GE Vinyl</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="apple-touch-icon" href="./favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/assets/index-BUQZTRDd.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-s5YotvVA.css">
+    <script>
+      // Global error handling overlay to prevent silent black screen crashes
+      window.onerror = function (message, source, lineno, colno, error) {
+        var root = document.getElementById('root');
+        if (!root || !root.innerHTML || root.innerHTML.trim() === "") {
+          var overlay = document.getElementById('error-overlay');
+          if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'error-overlay';
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100%';
+            overlay.style.height = '100%';
+            overlay.style.backgroundColor = '#121214';
+            overlay.style.color = '#f4f4f5';
+            overlay.style.display = 'flex';
+            overlay.style.flexDirection = 'column';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.padding = '24px';
+            overlay.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+            overlay.style.textAlign = 'center';
+            overlay.style.zIndex = '999999';
+            
+            overlay.innerHTML = `
+              <div style="max-width: 480px; background: #1a1a1e; border: 1px solid #2d2d34; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+                <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                <h2 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 600; color: #f43f5e;">Erreur de chargement</h2>
+                <p style="margin: 0 0 20px 0; font-size: 14px; color: #a1a1aa; line-height: 1.5;">
+                  L'application n'a pas pu démarrer correctement. Veuillez recharger ou vider le cache.
+                </p>
+                <div style="background: #0f0f11; border: 1px solid #242429; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 11px; color: #fda4af; text-align: left; overflow-x: auto; max-height: 120px; margin-bottom: 24px; white-space: pre-wrap;">
+                  ${message}<br/>at ${source}:${lineno}:${colno}
+                </div>
+                <button onclick="window.location.reload(true)" style="background: #d97706; border: none; color: white; padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; font-size: 14px;">
+                  Recharger
+                </button>
+              </div>
+            `;
+            document.body.appendChild(overlay);
+          }
+        }
+        return false;
+      };
+    </script>
+    <script type="module" crossorigin src="./assets/index-rB3n4ADv.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Dby52oVn.css">
   </head>
   <body>
+    <audio id="global-player" playsinline webkit-playsinline preload="auto" autoplay controls="false" style="display:none"></audio>
+    <script>
+      (function() {
+        var unlocked = false;
+        function unlock() {
+          if (unlocked) return;
+          var audio = document.getElementById('global-player');
+          if (audio) {
+            audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAA=';
+            audio.play().then(function() {
+              unlocked = true;
+              document.removeEventListener('touchstart', unlock);
+              document.removeEventListener('click', unlock);
+            }).catch(function() {});
+          }
+        }
+        document.addEventListener('touchstart', unlock, { passive: true, once: true });
+        document.addEventListener('click', unlock, { passive: true, once: true });
+      })();
+    </script>
     <div id="root"></div>
   </body>
 </html>

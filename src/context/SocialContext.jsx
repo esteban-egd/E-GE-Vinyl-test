@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import db from '../lib/db';
 import { updateUserStatus, getEffectiveStatus } from '../services/userBddService';
+import { initNotifications, sendNativeNotification } from '../services/notificationService';
 
 const SocialContext = createContext({});
 
@@ -232,9 +233,11 @@ export const SocialProvider = ({ children }) => {
           },
           isTextMessage: isText,
           message: s.message || '',
+          isLiked: s.is_liked || false,
+          replyToId: s.reply_to_id || null,
           createdAt: s.created_at || new Date().toISOString()
         };
-      });
+      }).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
       setSharedTracks(parsedShares);
 
@@ -274,6 +277,9 @@ export const SocialProvider = ({ children }) => {
   }, [loadSocialData]);
 
   useEffect(() => {
+    // Initialise les notifications Android et Web
+    initNotifications();
+
     loadSocialData();
 
     const currentUserId = user?.id || user?.uid;
@@ -362,6 +368,11 @@ export const SocialProvider = ({ children }) => {
 
           // Toast banner for incoming friend request
           triggerHaptic();
+          sendNativeNotification({
+            title: "📩 Demande d'ami",
+            body: `${senderName} veut devenir votre ami.`,
+            extra: { type: 'friend_request', id: newRow.id }
+          });
           toast((t) => (
             <div className="flex items-center justify-between gap-3 min-w-[280px]">
               <div className="flex flex-col text-xs">
@@ -413,6 +424,11 @@ export const SocialProvider = ({ children }) => {
         if (sendId === currentUserId || recId === currentUserId) {
           if (row.status === 'accepted' && sendId === currentUserId) {
             triggerHaptic();
+            sendNativeNotification({
+              title: "🎉 Demande d'ami acceptée !",
+              body: "Votre demande d'ami a été acceptée par votre contact.",
+              extra: { type: 'friend_accepted' }
+            });
             toast.success("Votre demande d'ami a été acceptée ! 🎉", { position: 'top-center' });
           }
           loadSocialData();
@@ -440,6 +456,8 @@ export const SocialProvider = ({ children }) => {
             }
           } catch (_) {}
 
+          const isText = !newRow.video_id || newRow.video_id === 'text_msg' || newRow.video_id === 'text' || (newRow.title === 'Message texte' && !newRow.thumbnail);
+
           const trackObj = {
             videoId: newRow.video_id || newRow.videoId,
             title: newRow.title,
@@ -448,25 +466,46 @@ export const SocialProvider = ({ children }) => {
             duration: newRow.duration || ''
           };
 
+          // Déclencher une VRAIE notification Android / Système
+          if (isText) {
+            sendNativeNotification({
+              title: `💬 Message de ${senderName}`,
+              body: newRow.message || 'Nouveau message reçu',
+              extra: { type: 'chat_message', senderId: newRow.sender_id, message: newRow.message }
+            });
+          } else {
+            sendNativeNotification({
+              title: `🎵 Musique reçue de ${senderName}`,
+              body: `${newRow.title} • ${newRow.artist || 'Artiste inconnu'}`,
+              extra: { type: 'play_track', track: trackObj }
+            });
+          }
+
           toast((t) => (
             <div className="flex items-center justify-between gap-3 min-w-[280px]">
               <div className="flex flex-col text-xs">
                 <span className="font-bold text-white flex items-center gap-1.5 uppercase tracking-tighter">
-                  🎵 Musique partagée
+                  {isText ? '💬 Nouveau Message' : '🎵 Musique partagée'}
                 </span>
                 <span className="text-neutral-400 mt-0.5 line-clamp-2">
-                  <strong>{senderName}</strong> vous conseille <strong>{newRow.title}</strong>
+                  {isText ? (
+                    <><strong>{senderName}</strong>: {newRow.message}</>
+                  ) : (
+                    <><strong>{senderName}</strong> vous conseille <strong>{newRow.title}</strong></>
+                  )}
                 </span>
               </div>
-              <button
-                onClick={() => {
-                  toast.dismiss(t.id);
-                  window.dispatchEvent(new CustomEvent('lyra:play_track', { detail: trackObj }));
-                }}
-                className="px-3 py-1.5 rounded-xl bg-[#c29e5a] hover:bg-[#d6b068] text-black font-extrabold text-[10px] uppercase tracking-wider shrink-0 shadow-lg cursor-pointer transition-all active:scale-95"
-              >
-                Écouter
-              </button>
+              {!isText && (
+                <button
+                  onClick={() => {
+                    toast.dismiss(t.id);
+                    window.dispatchEvent(new CustomEvent('lyra:play_track', { detail: trackObj }));
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-[#c29e5a] hover:bg-[#d6b068] text-black font-extrabold text-[10px] uppercase tracking-wider shrink-0 shadow-lg cursor-pointer transition-all active:scale-95"
+                >
+                  Écouter
+                </button>
+              )}
             </div>
           ), {
             duration: 10000,
@@ -719,7 +758,7 @@ export const SocialProvider = ({ children }) => {
   };
 
   // Send text-only message to friend
-  const sendMessageToFriend = async (friendId, text) => {
+  const sendMessageToFriend = async (friendId, text, replyToId = null) => {
     if (!user) {
       toast.error('Veuillez vous connecter pour envoyer un message.');
       return;
@@ -742,7 +781,9 @@ export const SocialProvider = ({ children }) => {
         title: 'Message texte',
         artist: '',
         thumbnail: '',
-        message: text.trim()
+        message: text.trim(),
+        reply_to_id: replyToId,
+        is_liked: false
       };
 
       const { error } = await supabase
@@ -755,6 +796,22 @@ export const SocialProvider = ({ children }) => {
     } catch (err) {
       console.error("Erreur envoi message:", err.message || err);
       toast.error("Erreur lors de l'envoi du message.");
+    }
+  };
+
+  // Like or unlike a shared message/track
+  const likeSharedItem = async (itemId, isLiked) => {
+    try {
+      const { error } = await supabase
+        .from('shared_tracks')
+        .update({ is_liked: isLiked })
+        .eq('id', itemId);
+
+      if (error) throw error;
+      
+      setSharedTracks(prev => prev.map(t => String(t.id) === String(itemId) ? { ...t, isLiked, is_liked: isLiked } : t));
+    } catch (err) {
+      console.error("Erreur update like:", err);
     }
   };
 
@@ -890,6 +947,7 @@ export const SocialProvider = ({ children }) => {
     updatePrivacySettings,
     shareTrackWithFriend,
     sendMessageToFriend,
+    likeSharedItem,
     shareModalState,
     openShareModal,
     closeShareModal,

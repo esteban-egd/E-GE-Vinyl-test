@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, Heart, Disc, Sparkles, Send, Lock, Play, 
-  Search, Check, Music, Radio, Activity, Globe, Users, UserPlus, MessageSquare, Clock
+  Search, Check, Music, Radio, Activity, Globe, Users, UserPlus, MessageSquare, Clock, Reply
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useSocial } from '../../context/SocialContext';
@@ -21,6 +21,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
     friends, 
     shareTrackWithFriend, 
     sendMessageToFriend, 
+    likeSharedItem,
     sendFriendRequest, 
     cancelFriendRequest, 
     pendingRequests, 
@@ -31,6 +32,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
   const [activeTab, setActiveTab] = useState('likes'); // 'likes' | 'playlists' | 'artists' | 'messages'
   const [chatInput, setChatInput] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
   
   // Data states
   const [likedTracks, setLikedTracks] = useState([]);
@@ -776,96 +778,156 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
 
                 {/* 4. MESSAGES TAB */}
                 {activeTab === 'messages' && (
-                  <div className="flex flex-col h-full space-y-3">
-                    <div className="flex-1 space-y-3 overflow-y-auto max-h-[350px] pr-1">
+                  <div className="flex flex-col h-full bg-[#0d0d0d] rounded-2xl overflow-hidden border border-white/5 relative">
+                    <div className="flex-1 p-5 overflow-y-auto max-h-[380px] no-scrollbar flex flex-col-reverse gap-5">
                       {conversationItems.length === 0 ? (
-                        <div className="py-12 text-center text-xs text-gray-400">
-                          Aucun message ou morceau partagé pour l'instant. Envoyez un premier message texte ou un morceau !
+                        <div className="py-16 flex flex-col items-center justify-center text-center space-y-3 opacity-40 h-full">
+                          <MessageSquare size={36} />
+                          <p className="text-[11px] font-mono">Aucun message.<br/>Commencez la discussion !</p>
                         </div>
                       ) : (
-                        conversationItems.map((item) => {
+                        [...conversationItems].reverse().map((item) => {
                           const isMe = String(item.senderId) === String(currentUserId);
+                          const repliedToItem = item.replyToId ? conversationItems.find(i => String(i.id) === String(item.replyToId)) : null;
+
                           return (
                             <div 
                               key={item.id} 
-                              className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1`}
+                              className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group w-full`}
                             >
-                              <div className="flex items-center gap-1.5 text-[9px] text-gray-400 px-1 font-mono">
-                                <span>{isMe ? 'Vous' : (item.sender?.full_name || item.sender?.username || 'Ami')}</span>
-                                <span>•</span>
-                                <span>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                              </div>
-
-                              {item.isTextMessage || !item.track ? (
-                                <div 
-                                  className={`max-w-[80%] p-3 rounded-2xl text-xs leading-relaxed shadow-md ${
-                                    isMe 
-                                      ? 'bg-gradient-to-r from-[#c29e5a] to-[#d6b068] text-black font-medium rounded-tr-none' 
-                                      : 'bg-white/10 text-white rounded-tl-none border border-white/10'
-                                  }`}
-                                >
-                                  {item.message}
+                                <div className="flex items-center gap-1.5 text-[9px] text-gray-500 px-1 font-mono mb-1.5">
+                                  <span>{isMe ? 'Vous' : (item.sender?.full_name || item.sender?.username || 'Ami')}</span>
+                                  <span>•</span>
+                                  <span>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                 </div>
-                              ) : (
-                                <div className={`w-full max-w-[85%] p-3 rounded-2xl bg-white/5 border border-white/10 flex flex-col gap-2.5 ${isMe ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
-                                  <div className="flex items-center justify-between gap-3">
-                                    <div className="flex items-center gap-3 min-w-0">
-                                      <img 
-                                        src={item.track.thumbnail} 
-                                        alt={item.track.title} 
-                                        className="w-10 h-10 rounded-lg object-cover border border-white/15 shrink-0"
-                                      />
-                                      <div className="min-w-0">
-                                        <h4 className="text-xs font-bold text-white truncate">{item.track.title}</h4>
-                                        <p className="text-[10px] text-gray-400 truncate">{item.track.artist}</p>
-                                      </div>
-                                    </div>
-                                    <button
-                                      onClick={() => play(item.track)}
-                                      className="p-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-all cursor-pointer shrink-0"
-                                      title="Écouter"
-                                    >
-                                      <Play size={13} fill="currentColor" />
+
+                                <div className={`relative flex items-center gap-3 ${isMe ? 'flex-row-reverse' : 'flex-row'} w-full`}>
+                                  
+                                  {/* Actions on hover */}
+                                  <div className={`opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                    <button onClick={() => setReplyingTo(item)} className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-all cursor-pointer" title="Répondre">
+                                      <Reply size={13} />
+                                    </button>
+                                    <button onClick={() => likeSharedItem(item.id, !item.isLiked)} className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-red-400 transition-all cursor-pointer" title="Aimer">
+                                      <Heart size={13} className={item.isLiked ? 'fill-red-500 text-red-500' : ''} />
                                     </button>
                                   </div>
-                                  {item.message && (
-                                    <p className="text-xs text-gray-300 italic bg-black/20 p-2 rounded-xl border border-white/5">
-                                      "{item.message}"
-                                    </p>
-                                  )}
+
+                                  <div className={`flex flex-col relative max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
+                                    {/* Replied context */}
+                                    {repliedToItem && (
+                                      <div className={`text-[10px] text-gray-400 mb-1 px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 opacity-80 max-w-full truncate flex flex-col gap-0.5`}>
+                                        <span className="font-bold flex items-center gap-1">
+                                          <Reply size={10} /> 
+                                          {String(repliedToItem.senderId) === String(currentUserId) ? 'Vous' : (repliedToItem.sender?.username || 'Ami')}
+                                        </span>
+                                        <span className="truncate opacity-80">
+                                          {repliedToItem.isTextMessage ? repliedToItem.message : `🎵 ${repliedToItem.track?.title}`}
+                                        </span>
+                                      </div>
+                                    )}
+
+                                    {item.isTextMessage || !item.track ? (
+                                      <div 
+                                        className={`px-4 py-2.5 rounded-2xl text-[13px] leading-relaxed shadow-sm relative ${
+                                          isMe 
+                                            ? 'bg-gradient-to-br from-[#c29e5a] to-[#a38043] text-black font-medium rounded-tr-sm' 
+                                            : 'bg-[#1a1a1a] text-gray-100 rounded-tl-sm border border-white/5'
+                                        }`}
+                                      >
+                                        {item.message}
+                                        {item.isLiked && (
+                                          <div className={`absolute -bottom-2 ${isMe ? '-left-2' : '-right-2'} bg-[#1a1a1a] p-1 rounded-full border border-white/5 shadow-md`}>
+                                            <Heart size={12} className="text-red-500 fill-red-500" />
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div className={`w-full p-3 rounded-2xl bg-[#1a1a1a] border border-white/5 flex flex-col gap-3 shadow-md relative ${isMe ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
+                                        <div className="flex items-center justify-between gap-4">
+                                          <div className="flex items-center gap-3 min-w-0">
+                                            <img 
+                                              src={item.track.thumbnail} 
+                                              alt={item.track.title} 
+                                              className="w-11 h-11 rounded-lg object-cover border border-white/10 shrink-0 shadow-sm"
+                                            />
+                                            <div className="min-w-0 flex flex-col justify-center">
+                                              <h4 className="text-xs font-bold text-white truncate leading-tight">{item.track.title}</h4>
+                                              <p className="text-[10px] text-gray-400 truncate mt-0.5">{item.track.artist}</p>
+                                            </div>
+                                          </div>
+                                          <button
+                                            onClick={() => play(item.track)}
+                                            className={`p-2.5 rounded-full text-black transition-all cursor-pointer shrink-0 hover:scale-105 ${isMe ? 'bg-[#c29e5a]' : 'bg-white'}`}
+                                            title="Écouter"
+                                          >
+                                            <Play size={14} fill="currentColor" className="ml-0.5" />
+                                          </button>
+                                        </div>
+                                        {item.message && (
+                                          <p className={`text-xs p-2.5 rounded-xl border opacity-90 ${isMe ? 'bg-[#c29e5a]/10 border-[#c29e5a]/20 text-[#d6b068]' : 'bg-black/40 border-white/5 text-gray-300'}`}>
+                                            "{item.message}"
+                                          </p>
+                                        )}
+                                        {item.isLiked && (
+                                          <div className={`absolute -bottom-2 ${isMe ? '-left-2' : '-right-2'} bg-[#1a1a1a] p-1 rounded-full border border-white/5 shadow-md z-10`}>
+                                            <Heart size={12} className="text-red-500 fill-red-500" />
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })
-                      )}
+                              </div>
+                            );
+                          })
+                        )}
                     </div>
 
-                    <form 
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        if (!chatInput.trim() || !targetId) return;
-                        setSendingMessage(true);
-                        try {
-                          await sendMessageToFriend(targetId, chatInput);
-                          setChatInput('');
-                        } catch (err) {
-                          console.error(err);
-                        } finally {
-                          setSendingMessage(false);
-                        }
-                      }} 
-                      className="flex items-center gap-2 pt-3 border-t border-white/10"
-                    >
-                      <input
-                        type="text"
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        placeholder="Écrire un message texte..."
-                        className="flex-1 px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-white/30"
-                      />
-                      <button
-                        type="submit"
+                    <div className="p-3 bg-[#131313] border-t border-white/5 flex flex-col gap-2">
+                      {replyingTo && (
+                        <div className="flex items-center justify-between bg-black/40 px-3 py-2 rounded-lg border border-white/5 text-[10px]">
+                          <div className="flex flex-col min-w-0 pr-2">
+                            <span className="text-[#c29e5a] font-bold flex items-center gap-1.5 mb-0.5">
+                              <Reply size={10} /> Réponse à {String(replyingTo.senderId) === String(currentUserId) ? 'Vous' : (replyingTo.sender?.username || 'Ami')}
+                            </span>
+                            <span className="text-gray-400 truncate">
+                              {replyingTo.isTextMessage ? replyingTo.message : `🎵 ${replyingTo.track?.title}`}
+                            </span>
+                          </div>
+                          <button onClick={() => setReplyingTo(null)} className="p-1 rounded-full hover:bg-white/10 text-gray-500 hover:text-white cursor-pointer shrink-0">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      )}
+                      
+                      <form 
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          if (!chatInput.trim() || !targetId) return;
+                          setSendingMessage(true);
+                          try {
+                            await sendMessageToFriend(targetId, chatInput, replyingTo?.id || null);
+                            setChatInput('');
+                            setReplyingTo(null);
+                          } catch (err) {
+                            console.error(err);
+                          } finally {
+                            setSendingMessage(false);
+                          }
+                        }} 
+                        className="flex items-center gap-2"
+                      >
+                        <input
+                          type="text"
+                          value={chatInput}
+                          onChange={(e) => setChatInput(e.target.value)}
+                          placeholder="Votre message..."
+                          className="flex-1 px-4 py-2.5 bg-black/40 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-[#c29e5a]/50 focus:bg-black/60 transition-all placeholder:text-gray-600"
+                        />
+                        <button
+                          type="submit"
                         disabled={sendingMessage || !chatInput.trim()}
                         className="px-4 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-transform active:scale-95"
                         style={{ backgroundColor: currentTheme.primary, color: '#000' }}
@@ -874,6 +936,7 @@ export default function UserProfileModal({ friend, isOpen, onClose }) {
                         <span>Envoyer</span>
                       </button>
                     </form>
+                  </div>
                   </div>
                 )}
               </>
