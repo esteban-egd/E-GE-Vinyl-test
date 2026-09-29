@@ -505,25 +505,12 @@ export function useAudioPlayer() {
     };
     const onError = async () => {
       if (activeEngineRef.current === 'audio') {
-        console.warn('[AudioEngine] Erreur audio HTML5, tentative de récupération automatique...');
+        console.warn('[AudioEngine] Erreur audio HTML5, tentative de bascule vers le lecteur YouTube...');
         const track = currentTrack;
         const validId = extractYouTubeId(track?.videoId || track?.ytVideoId || track?.id);
         
         if (validId && validId.length === 11) {
-          // 1. Try high-performance server stream proxy
-          if (audioRef.current && !audioRef.current.src.includes(`/api/stream?id=${validId}`)) {
-            try {
-              audioRef.current.src = `/api/stream?id=${validId}`;
-              audioRef.current.volume = volume;
-              await audioRef.current.play();
-              setIsPlaying(true);
-              setIsLoading(false);
-              setError(null);
-              return;
-            } catch (_) {}
-          }
-          
-          // 2. Try YouTube iframe player
+          // Direct switch to YouTube iframe player
           if (iframePlayerRef.current && typeof iframePlayerRef.current.loadVideoById === 'function') {
             activeEngineRef.current = 'iframe';
             try {
@@ -540,24 +527,13 @@ export function useAudioPlayer() {
             }
           }
         } else if (track && (track.title || track.artist)) {
-          // 3. Dynamic search resolution fallback
+          // Dynamic search resolution fallback
           try {
             const query = `${track.title || ''} ${track.artist || ''}`.trim();
             const results = await searchLyraMusic(query);
             if (results && results.length > 0) {
               const foundId = extractYouTubeId(results[0].videoId || results[0].id);
               if (foundId && foundId.length === 11) {
-                if (audioRef.current) {
-                  audioRef.current.src = `/api/stream?id=${foundId}`;
-                  audioRef.current.volume = volume;
-                  try {
-                    await audioRef.current.play();
-                    setIsPlaying(true);
-                    setIsLoading(false);
-                    setError(null);
-                    return;
-                  } catch (_) {}
-                }
                 if (iframePlayerRef.current && typeof iframePlayerRef.current.loadVideoById === 'function') {
                   activeEngineRef.current = 'iframe';
                   iframePlayerRef.current.loadVideoById(foundId, 0);
@@ -606,24 +582,20 @@ export function useAudioPlayer() {
     if (player && pendingTrackRef.current) {
       const track = pendingTrackRef.current;
       pendingTrackRef.current = null;
-      activeEngineRef.current = 'iframe';
       const validYtId = extractYouTubeId(track.videoId || track.ytVideoId || track.id);
-      try {
-        if (typeof player.unMute === 'function') {
-          player.unMute();
-        }
-        if (typeof player.setVolume === 'function') {
-          player.setVolume(Math.round(volume * 100));
-        }
-        if (validYtId && typeof player.loadVideoById === 'function') {
+      if (validYtId && typeof player.loadVideoById === 'function') {
+        activeEngineRef.current = 'iframe';
+        try {
+          if (typeof player.unMute === 'function') player.unMute();
+          if (typeof player.setVolume === 'function') player.setVolume(Math.round(volume * 100));
           player.loadVideoById(validYtId, 0);
           if (typeof player.playVideo === 'function') player.playVideo();
+          setIsPlaying(true);
+          setIsLoading(false);
+        } catch (err) {
+          console.warn('[AudioEngine] Pending iframe play error:', err);
         }
-      } catch (err) {
-        console.warn('[AudioEngine] Pending iframe play error:', err);
       }
-      setIsPlaying(true);
-      setIsLoading(false);
     }
   }, [volume]);
 
@@ -941,6 +913,7 @@ export function useAudioPlayer() {
       albumId: rawTrack.albumId || (typeof rawTrack.album === 'object' ? rawTrack.album?.id : undefined),
       album: rawTrack.album || (rawTrack.albumObj ? rawTrack.albumObj.title : undefined),
       videoId: validYtId || rawTrack.videoId || rawTrack.id,
+      previewUrl: rawTrack.previewUrl || rawTrack.preview || '',
       thumbnail: getHdArtwork(rawTrack.thumbnail, validYtId || rawTrack.id)
     };
 
@@ -972,21 +945,40 @@ export function useAudioPlayer() {
       } catch (_) {}
     }
 
-    // INSTANT SYNCHRONOUS PLAYBACK START (Fixes first-tap issue on iOS/Safari and mobile)
-    if (validYtId && audioRef.current) {
+    // Direct playback if we already have an 11-char YouTube ID
+    if (validYtId) {
+      const player = iframePlayerRef.current;
+      if (player && typeof player.loadVideoById === 'function') {
+        activeEngineRef.current = 'iframe';
+        try {
+          if (typeof player.unMute === 'function') player.unMute();
+          if (typeof player.setVolume === 'function') player.setVolume(Math.round(volume * 100));
+          player.loadVideoById(validYtId, 0);
+          if (typeof player.playVideo === 'function') player.playVideo();
+          setIsPlaying(true);
+          setIsLoading(false);
+          setError(null);
+        } catch (e) {
+          console.warn('[AudioEngine] Instant iframe play error:', e);
+        }
+      } else {
+        pendingTrackRef.current = trackMeta;
+      }
+    } else if (trackMeta.previewUrl && audioRef.current) {
+      // Instant HQ audio preview while YouTube video ID is searched in parallel
       try {
         activeEngineRef.current = 'audio';
-        audioRef.current.src = `/api/stream?id=${validYtId}`;
+        audioRef.current.src = trackMeta.previewUrl;
         audioRef.current.volume = volume;
         audioRef.current.play().then(() => {
           setIsPlaying(true);
           setIsLoading(false);
           setError(null);
         }).catch((err) => {
-          console.warn('[AudioEngine] Instant play deferred/rejected:', err);
+          console.warn('[AudioEngine] Preview play deferred:', err);
         });
       } catch (e) {
-        console.warn('[AudioEngine] Instant play exception:', e);
+        console.warn('[AudioEngine] Preview play exception:', e);
       }
     }
 
@@ -1104,205 +1096,168 @@ export function useAudioPlayer() {
         return;
       }
 
-      // --- STANDARD ONLINE STREAMING ---
-      activeEngineRef.current = 'audio';
+      // If valid YouTube ID is already playing, we are all set
+      if (validYtId) {
+        return;
+      }
+
+      // Resolve YouTube video ID for full playback
       try {
-        const streamUrl = await getLyraAudioStream(
-          trackMeta.videoId || trackMeta.id,
-          trackMeta.title,
-          trackMeta.artist,
-          trackMeta.duration
-        );
+        let cleanArtist = getMainArtistName(trackMeta.artist);
+        let cleanTitle = (trackMeta.title || '')
+          .replace(/\b(live|en concert|in concert|live at|live in|live performance|live session|unplugged|en direct|live version|concert|tv show|festival|tour|bootleg|live recording|session live|bbc sessions)\b.*/i, '')
+          .replace(/[\(\[\{].*?[\)\]\}]/g, '')
+          .trim();
 
-        if (currentRequestId !== playRequestIdRef.current) return;
+        const query = `${cleanTitle} ${cleanArtist}`.trim();
 
-        if (streamUrl && audioRef.current) {
-          audioRef.current.src = streamUrl;
-          audioRef.current.volume = volume;
-          await audioRef.current.play();
-          setIsPlaying(true);
-          setIsLoading(false);
-          setError(null);
+        let searchResults = await searchLyraMusic(query);
+
+        if ((!searchResults || searchResults.length === 0) && cleanArtist && cleanTitle) {
+          searchResults = await searchLyraMusic(`${cleanArtist} ${cleanTitle}`);
+        }
+
+        if (!searchResults || searchResults.length === 0) {
+          searchResults = await searchLyraTracks(query);
+        }
+
+        if (currentRequestId !== playRequestIdRef.current) {
           return;
         }
-      } catch (streamErr) {
-        console.warn('[AudioEngine] Streaming failed, trying iframe fallback...', streamErr);
-      }
 
-      // --- FALLBACK TO YOUTUBE IFRAME ---
-      activeEngineRef.current = 'iframe';
-      const player = iframePlayerRef.current;
+        if (searchResults && searchResults.length > 0) {
+          const getDurationSec = (itm) => {
+            if (typeof itm.duration === 'number') return itm.duration;
+            if (typeof itm.lengthSeconds === 'number') return itm.lengthSeconds;
+            if (typeof itm.lengthSeconds === 'string') {
+              const parsed = parseInt(itm.lengthSeconds, 10);
+              if (!isNaN(parsed)) return parsed;
+            }
+            if (typeof itm.duration === 'string') {
+              const parts = itm.duration.split(':').map(Number);
+              if (parts.length === 2) return parts[0] * 60 + parts[1];
+              if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+              const parsed = parseInt(itm.duration, 10);
+              if (!isNaN(parsed)) return parsed;
+            }
+            return 0;
+          };
 
-      if (player) {
-        try {
-          if (typeof player.unMute === 'function') player.unMute();
-          if (typeof player.setVolume === 'function') player.setVolume(Math.round(volume * 100));
-        } catch (_) {}
-      } else {
-        pendingTrackRef.current = trackMeta;
-      }
+          let bestTrack = null;
+          let highestScore = -99999;
+          const targetDuration = trackMeta.duration || 0;
 
-      if (validYtId) {
-        if (player && typeof player.loadVideoById === 'function') {
-          try {
-            player.loadVideoById(validYtId, 0);
-            if (typeof player.playVideo === 'function') player.playVideo();
-          } catch (err) {
-            console.warn('[AudioEngine] Erreur lecture iframe directe:', err);
-          }
-        }
-        setIsPlaying(true);
-        setIsLoading(false);
-      } else {
-        try {
-          let cleanArtist = getMainArtistName(trackMeta.artist);
-          let cleanTitle = (trackMeta.title || '')
-            .replace(/\b(live|en concert|in concert|live at|live in|live performance|live session|unplugged|en direct|live version|concert|tv show|festival|tour|bootleg|live recording|session live|bbc sessions)\b.*/i, '')
-            .replace(/[\(\[\{].*?[\)\]\}]/g, '')
-            .trim();
+          // 1. Chercher des morceaux avec une tolérance stricte de +/- 3s
+          for (const item of searchResults) {
+            const itemDuration = getDurationSec(item);
+            const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
+            const diff = targetDuration > 0 && itemDuration > 0 ? Math.abs(itemDuration - targetDuration) : 9999;
 
-          const query = `${cleanTitle} ${cleanArtist}`.trim();
-
-          let searchResults = await searchLyraMusic(query);
-
-          if ((!searchResults || searchResults.length === 0) && cleanArtist && cleanTitle) {
-            searchResults = await searchLyraMusic(`${cleanArtist} ${cleanTitle}`);
-          }
-
-          if (!searchResults || searchResults.length === 0) {
-            searchResults = await searchLyraTracks(query);
-          }
-
-          if (currentRequestId !== playRequestIdRef.current) {
-            return;
-          }
-
-          if (searchResults && searchResults.length > 0) {
-            const getDurationSec = (itm) => {
-              if (typeof itm.duration === 'number') return itm.duration;
-              if (typeof itm.lengthSeconds === 'number') return itm.lengthSeconds;
-              if (typeof itm.lengthSeconds === 'string') {
-                const parsed = parseInt(itm.lengthSeconds, 10);
-                if (!isNaN(parsed)) return parsed;
+            if (targetDuration > 0 && itemDuration > 0 && diff <= 3) {
+              const augmentedScore = score + 10000 - diff * 1000;
+              if (augmentedScore > highestScore) {
+                highestScore = augmentedScore;
+                bestTrack = item;
               }
-              if (typeof itm.duration === 'string') {
-                const parts = itm.duration.split(':').map(Number);
-                if (parts.length === 2) return parts[0] * 60 + parts[1];
-                if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-                const parsed = parseInt(itm.duration, 10);
-                if (!isNaN(parsed)) return parsed;
-              }
-              return 0;
-            };
+            }
+          }
 
-            let bestTrack = null;
-            let highestScore = -99999;
-            const targetDuration = trackMeta.duration || 0;
-
-            // 1. Chercher des morceaux avec une tolérance stricte de +/- 3s
+          // 2. Repli à +/- 10s si aucun morceau de +/- 3s trouvé
+          if (!bestTrack) {
             for (const item of searchResults) {
               const itemDuration = getDurationSec(item);
               const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
               const diff = targetDuration > 0 && itemDuration > 0 ? Math.abs(itemDuration - targetDuration) : 9999;
 
-              if (targetDuration > 0 && itemDuration > 0 && diff <= 3) {
-                const augmentedScore = score + 10000 - diff * 1000;
+              if (targetDuration > 0 && itemDuration > 0 && diff <= 10) {
+                const augmentedScore = score + 5000 - diff * 200;
                 if (augmentedScore > highestScore) {
                   highestScore = augmentedScore;
                   bestTrack = item;
                 }
               }
             }
+          }
 
-            // 2. Repli à +/- 10s si aucun morceau de +/- 3s trouvé
-            if (!bestTrack) {
-              for (const item of searchResults) {
-                const itemDuration = getDurationSec(item);
-                const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
-                const diff = targetDuration > 0 && itemDuration > 0 ? Math.abs(itemDuration - targetDuration) : 9999;
-
-                if (targetDuration > 0 && itemDuration > 0 && diff <= 10) {
-                  const augmentedScore = score + 5000 - diff * 200;
-                  if (augmentedScore > highestScore) {
-                    highestScore = augmentedScore;
-                    bestTrack = item;
-                  }
-                }
+          // 3. Repli général par score original
+          if (!bestTrack) {
+            bestTrack = searchResults[0];
+            for (const item of searchResults) {
+              const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
+              if (score > highestScore) {
+                highestScore = score;
+                bestTrack = item;
               }
             }
+          }
 
-            // 3. Repli général par score original
-            if (!bestTrack) {
-              bestTrack = searchResults[0];
-              for (const item of searchResults) {
-                const score = scoreAudioTrack(item, cleanTitle, cleanArtist);
-                if (score > highestScore) {
-                  highestScore = score;
-                  bestTrack = item;
-                }
-              }
+          const foundId = extractYouTubeId(bestTrack.videoId || bestTrack.id);
+          if (foundId && foundId.length === 11) {
+            trackMeta.videoId = foundId;
+            trackMeta.id = foundId;
+            if (bestTrack.thumbnail && !trackMeta.thumbnail) {
+              trackMeta.thumbnail = bestTrack.thumbnail;
             }
+            setCurrentTrack({ ...trackMeta });
+            updateMediaSessionMetadata(trackMeta);
 
-            const foundId = extractYouTubeId(bestTrack.videoId || bestTrack.id);
-            if (foundId && foundId.length === 11) {
-              trackMeta.videoId = foundId;
-              trackMeta.id = foundId;
-              if (bestTrack.thumbnail && !trackMeta.thumbnail) {
-                trackMeta.thumbnail = bestTrack.thumbnail;
-              }
-              setCurrentTrack({ ...trackMeta });
-              updateMediaSessionMetadata(trackMeta);
-
-              // 1. Try HTML5 high fidelity stream first
+            // Switch to YouTube Iframe for full authentic track
+            const currentPlayer = iframePlayerRef.current;
+            if (currentPlayer && typeof currentPlayer.loadVideoById === 'function') {
+              // Pause audio preview if active
               if (audioRef.current) {
                 try {
-                  activeEngineRef.current = 'audio';
-                  audioRef.current.src = `/api/stream?id=${foundId}`;
-                  audioRef.current.volume = volume;
-                  await audioRef.current.play();
-                  setIsPlaying(true);
-                  setIsLoading(false);
-                  setError(null);
-                  return;
-                } catch (audioErr) {
-                  console.warn('[AudioEngine] HTML5 stream direct play failed on resolved ID, using iframe fallback:', audioErr);
-                }
+                  audioRef.current.pause();
+                  audioRef.current.removeAttribute('src');
+                } catch (_) {}
               }
-
-              // 2. Iframe Fallback
               activeEngineRef.current = 'iframe';
-              const currentPlayer2 = iframePlayerRef.current;
-              if (currentPlayer2 && typeof currentPlayer2.loadVideoById === 'function') {
-                if (typeof currentPlayer2.unMute === 'function') currentPlayer2.unMute();
-                if (typeof currentPlayer2.setVolume === 'function') currentPlayer2.setVolume(Math.round(volume * 100));
-                currentPlayer2.loadVideoById(foundId, 0);
-                if (typeof currentPlayer2.playVideo === 'function') currentPlayer2.playVideo();
-              } else {
-                pendingTrackRef.current = trackMeta;
-              }
+              if (typeof currentPlayer.unMute === 'function') currentPlayer.unMute();
+              if (typeof currentPlayer.setVolume === 'function') currentPlayer.setVolume(Math.round(volume * 100));
+              currentPlayer.loadVideoById(foundId, 0);
+              if (typeof currentPlayer.playVideo === 'function') currentPlayer.playVideo();
               setIsPlaying(true);
               setIsLoading(false);
+              setError(null);
               return;
+            } else {
+              pendingTrackRef.current = trackMeta;
             }
+            setIsPlaying(true);
+            setIsLoading(false);
+            return;
           }
-          throw new Error("Titre introuvable sur YouTube");
-        } catch (err) {
-          if (currentRequestId !== playRequestIdRef.current) return;
-          console.error('[AudioEngine] Erreur recherche YouTube:', err);
-          setError("Impossible de trouver ce titre.");
-          setIsLoading(false);
-          setIsPlaying(false);
+        }
 
-          const currentPlayer2 = iframePlayerRef.current;
-          if (currentPlayer2) {
-            try {
-              if (typeof currentPlayer2.stopVideo === 'function') {
-                currentPlayer2.stopVideo();
-              } else if (typeof currentPlayer2.pauseVideo === 'function') {
-                currentPlayer2.pauseVideo();
-              }
-            } catch (_) {}
-          }
+        // If no YouTube match but preview was playing, continue preview
+        if (trackMeta.previewUrl && audioRef.current && !audioRef.current.paused) {
+          setIsPlaying(true);
+          setIsLoading(false);
+          return;
+        }
+
+        throw new Error("Titre introuvable sur YouTube");
+      } catch (err) {
+        if (currentRequestId !== playRequestIdRef.current) return;
+        console.error('[AudioEngine] Erreur recherche YouTube:', err);
+        if (trackMeta.previewUrl && audioRef.current && !audioRef.current.paused) {
+          setIsPlaying(true);
+          setIsLoading(false);
+          return;
+        }
+        setError("Impossible de trouver ce titre.");
+        setIsLoading(false);
+        setIsPlaying(false);
+
+        const currentPlayer2 = iframePlayerRef.current;
+        if (currentPlayer2) {
+          try {
+            if (typeof currentPlayer2.stopVideo === 'function') {
+              currentPlayer2.stopVideo();
+            } else if (typeof currentPlayer2.pauseVideo === 'function') {
+              currentPlayer2.pauseVideo();
+            }
+          } catch (_) {}
         }
       }
     })();

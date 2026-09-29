@@ -24,7 +24,6 @@ export default function YouTubeIframe() {
         playerRef.current = new window.YT.Player(containerRef.current, {
           height: '100%',
           width: '100%',
-          videoId: 'M7lc1UVf-VE',
           playerVars: {
             autoplay: 0,
             controls: 0,
@@ -35,7 +34,6 @@ export default function YouTubeIframe() {
             rel: 0,
             iv_load_policy: 3,
             enablejsapi: 1,
-            origin: typeof window !== 'undefined' ? window.location.origin : undefined,
           },
           events: {
             onReady: (event) => {
@@ -117,15 +115,15 @@ export default function YouTubeIframe() {
         position: 'fixed',
         bottom: 0,
         right: 0,
-        width: '200px',
-        height: '200px',
-        opacity: 0.001,
+        width: '64px',
+        height: '64px',
+        opacity: 0.01,
         pointerEvents: 'none',
-        zIndex: -9999,
+        zIndex: 1,
         overflow: 'hidden',
       }}
     >
-      <div style={{ width: '200px', height: '200px' }}>
+      <div style={{ width: '64px', height: '64px' }}>
         <div ref={containerRef} id="yt-hidden-engine" className="w-full h-full" />
       </div>
     </div>
