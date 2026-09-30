@@ -7,6 +7,7 @@ import { getTrackAudioUrl, getCachedImageUrl } from '../services/offlineStorageS
 import { getHdArtwork, getMainArtistName, isLiveTrack, isClipTrack, scoreAudioTrack } from '../services/musicDataService';
 import { searchLyraMusic, extractYouTubeId } from '../services/lyraAudio';
 import { searchLyraTracks } from '../services/lyraSearch';
+import { addRecentlyPlayed } from '../services/recentlyPlayedService';
 
 const SILENT_AUDIO_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 
@@ -582,7 +583,7 @@ export function useAudioPlayer() {
     if (player && pendingTrackRef.current) {
       const track = pendingTrackRef.current;
       pendingTrackRef.current = null;
-      const validYtId = extractYouTubeId(track.videoId || track.ytVideoId || track.id);
+      let validYtId = extractYouTubeId(track.videoId || track.ytVideoId || track.id);
       if (validYtId && typeof player.loadVideoById === 'function') {
         activeEngineRef.current = 'iframe';
         try {
@@ -592,9 +593,32 @@ export function useAudioPlayer() {
           if (typeof player.playVideo === 'function') player.playVideo();
           setIsPlaying(true);
           setIsLoading(false);
+          setError(null);
         } catch (err) {
           console.warn('[AudioEngine] Pending iframe play error:', err);
         }
+      } else if (track && (track.title || track.artist)) {
+        setIsLoading(true);
+        const cleanArtist = getMainArtistName(track.artist);
+        const cleanTitle = (track.title || '').replace(/\b(live|en concert|in concert|live at|live in|live performance|live session|unplugged|en direct|live version|concert|tv show|festival|tour|bootleg|live recording|session live|bbc sessions)\b.*/i, '').replace(/[\(\[\{].*?[\)\]\}]/g, '').trim();
+        const query = `${cleanTitle} ${cleanArtist}`.trim();
+        searchLyraMusic(query).then((results) => {
+          if (results && results.length > 0) {
+            const foundId = extractYouTubeId(results[0].videoId || results[0].id);
+            if (foundId && typeof player.loadVideoById === 'function') {
+              activeEngineRef.current = 'iframe';
+              if (typeof player.unMute === 'function') player.unMute();
+              if (typeof player.setVolume === 'function') player.setVolume(Math.round(volume * 100));
+              player.loadVideoById(foundId, 0);
+              if (typeof player.playVideo === 'function') player.playVideo();
+              setIsPlaying(true);
+              setIsLoading(false);
+              setError(null);
+            }
+          }
+        }).catch((err) => {
+          console.warn('[AudioEngine] Pending track YouTube search error:', err);
+        });
       }
     }
   }, [volume]);
@@ -913,7 +937,6 @@ export function useAudioPlayer() {
       albumId: rawTrack.albumId || (typeof rawTrack.album === 'object' ? rawTrack.album?.id : undefined),
       album: rawTrack.album || (rawTrack.albumObj ? rawTrack.albumObj.title : undefined),
       videoId: validYtId || rawTrack.videoId || rawTrack.id,
-      previewUrl: rawTrack.previewUrl || rawTrack.preview || '',
       thumbnail: getHdArtwork(rawTrack.thumbnail, validYtId || rawTrack.id)
     };
 
@@ -924,9 +947,10 @@ export function useAudioPlayer() {
     setError(null);
     setIsLoading(true);
     setCurrentTime(0);
-    setDuration(0);
+    setDuration(rawTrack.duration || 0);
     setCurrentTrack(trackMeta);
     updateMediaSessionMetadata(trackMeta);
+    addRecentlyPlayed(trackMeta);
 
     // Stop HTML5 audio element if playing (reuse audio channel without destroying/clearing src on iOS)
     if (audioRef.current) {
@@ -963,22 +987,6 @@ export function useAudioPlayer() {
         }
       } else {
         pendingTrackRef.current = trackMeta;
-      }
-    } else if (trackMeta.previewUrl && audioRef.current) {
-      // Instant HQ audio preview while YouTube video ID is searched in parallel
-      try {
-        activeEngineRef.current = 'audio';
-        audioRef.current.src = trackMeta.previewUrl;
-        audioRef.current.volume = volume;
-        audioRef.current.play().then(() => {
-          setIsPlaying(true);
-          setIsLoading(false);
-          setError(null);
-        }).catch((err) => {
-          console.warn('[AudioEngine] Preview play deferred:', err);
-        });
-      } catch (e) {
-        console.warn('[AudioEngine] Preview play exception:', e);
       }
     }
 
@@ -1198,19 +1206,17 @@ export function useAudioPlayer() {
             if (bestTrack.thumbnail && !trackMeta.thumbnail) {
               trackMeta.thumbnail = bestTrack.thumbnail;
             }
+            if (bestTrack.duration && bestTrack.duration > 0) {
+              trackMeta.duration = bestTrack.duration;
+              setDuration(bestTrack.duration);
+            }
             setCurrentTrack({ ...trackMeta });
             updateMediaSessionMetadata(trackMeta);
+            addRecentlyPlayed(trackMeta);
 
             // Switch to YouTube Iframe for full authentic track
             const currentPlayer = iframePlayerRef.current;
             if (currentPlayer && typeof currentPlayer.loadVideoById === 'function') {
-              // Pause audio preview if active
-              if (audioRef.current) {
-                try {
-                  audioRef.current.pause();
-                  audioRef.current.removeAttribute('src');
-                } catch (_) {}
-              }
               activeEngineRef.current = 'iframe';
               if (typeof currentPlayer.unMute === 'function') currentPlayer.unMute();
               if (typeof currentPlayer.setVolume === 'function') currentPlayer.setVolume(Math.round(volume * 100));
@@ -1229,22 +1235,10 @@ export function useAudioPlayer() {
           }
         }
 
-        // If no YouTube match but preview was playing, continue preview
-        if (trackMeta.previewUrl && audioRef.current && !audioRef.current.paused) {
-          setIsPlaying(true);
-          setIsLoading(false);
-          return;
-        }
-
         throw new Error("Titre introuvable sur YouTube");
       } catch (err) {
         if (currentRequestId !== playRequestIdRef.current) return;
         console.error('[AudioEngine] Erreur recherche YouTube:', err);
-        if (trackMeta.previewUrl && audioRef.current && !audioRef.current.paused) {
-          setIsPlaying(true);
-          setIsLoading(false);
-          return;
-        }
         setError("Impossible de trouver ce titre.");
         setIsLoading(false);
         setIsPlaying(false);

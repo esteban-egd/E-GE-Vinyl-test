@@ -3,7 +3,7 @@ import { useAudio } from '../../context/AudioContext';
 
 /**
  * YouTubeIframeEngine
- * Moteur YouTube Iframe invisible pour la lecture Web instantanée.
+ * Moteur YouTube Iframe invisible pour la lecture audio complète instantanée.
  */
 export default function YouTubeIframe() {
   const { setIframePlayer, onIframeStateChange, onIframeError } = useAudio();
@@ -34,6 +34,7 @@ export default function YouTubeIframe() {
             rel: 0,
             iv_load_policy: 3,
             enablejsapi: 1,
+            origin: window.location.origin
           },
           events: {
             onReady: (event) => {
@@ -69,6 +70,8 @@ export default function YouTubeIframe() {
       }
     }
 
+    let pollInterval = null;
+
     if (window.YT && window.YT.Player) {
       initPlayer();
     } else {
@@ -90,9 +93,17 @@ export default function YouTubeIframe() {
         if (typeof prevOnReady === 'function') prevOnReady();
         initPlayer();
       };
+
+      // Interval fallback in case onYouTubeIframeAPIReady already triggered
+      pollInterval = setInterval(() => {
+        if (window.YT && window.YT.Player && !playerRef.current) {
+          initPlayer();
+        }
+      }, 150);
     }
 
     return () => {
+      if (pollInterval) clearInterval(pollInterval);
       try {
         if (playerRef.current && typeof playerRef.current.destroy === 'function') {
           playerRef.current.destroy();
@@ -115,15 +126,15 @@ export default function YouTubeIframe() {
         position: 'fixed',
         bottom: 0,
         right: 0,
-        width: '64px',
-        height: '64px',
-        opacity: 0.01,
+        width: '240px',
+        height: '240px',
+        opacity: 0.001,
         pointerEvents: 'none',
-        zIndex: 1,
+        zIndex: -1,
         overflow: 'hidden',
       }}
     >
-      <div style={{ width: '64px', height: '64px' }}>
+      <div style={{ width: '240px', height: '240px' }}>
         <div ref={containerRef} id="yt-hidden-engine" className="w-full h-full" />
       </div>
     </div>

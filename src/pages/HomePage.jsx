@@ -15,8 +15,10 @@ import { useNavigate } from 'react-router-dom';
 import ArtistAvatar from '../components/common/ArtistAvatar';
 import AddToPlaylistModal from '../components/common/AddToPlaylistModal';
 import PlaylistDetailModal from '../components/common/PlaylistDetailModal';
+import RecentlyPlayedSection from '../components/home/RecentlyPlayedSection';
 import db from '../lib/db';
 import { fetchListeningHistory } from '../services/userBddService';
+import { getRecentlyPlayed, addRecentlyPlayed } from '../services/recentlyPlayedService';
 import { 
   Search, 
   Play, 
@@ -83,6 +85,14 @@ export default function HomePage() {
           if (history && history[0]?.artist) {
             setSeedArtistName(getMainArtistName(history[0].artist));
           }
+
+          // Hydrater le localStorage si aucun élément n'y est encore stocké
+          try {
+            const currentLocal = getRecentlyPlayed(1);
+            if (currentLocal.length === 0 && history && history.length > 0) {
+              history.slice(0, 10).reverse().forEach(t => addRecentlyPlayed(t));
+            }
+          } catch (_) {}
         }
       } catch (err) {
         console.warn('Erreur chargement historique:', err);
@@ -426,6 +436,9 @@ export default function HomePage() {
           );
         })}
       </div>
+
+      {/* 2.5 Section: "Recently Played" (10 derniers vinyles/morceaux écoutés via localStorage) */}
+      <RecentlyPlayedSection onSelectTrackForPlaylist={setSelectedTrackForPlaylist} />
 
       {/* 3. Section: "Sélection Exclusive" */}
       <div className="space-y-4 pt-2">
